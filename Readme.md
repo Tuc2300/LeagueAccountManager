@@ -13,6 +13,7 @@ Ein Account Manager für League of Legends mit Auto-Login Funktion.
 - 📋 **Clipboard Support** - Kopiere Username und Passwort mit einem Klick
 - 🔄 **Auto-Update** - Automatische Update-Benachrichtigung über GitHub Releases
 - 💾 **Lokale Datenspeicherung** - Alle Daten werden lokal gespeichert
+- 👨 **Unique** - Ist für jeden Nutzer Unique und für andere Nutzer nicht einsehbar
 
 ## 📸 Screenshots
 
@@ -24,4 +25,5 @@ Ein Account Manager für League of Legends mit Auto-Login Funktion.
 
 1. Lade die neueste Version von den [Releases](https://github.com/Tuc2300/LeagueAccountManager/releases) herunter
 2. Extrahiere die ZIP-Datei oder starte die `.exe` direkt
+
 3. Fertig! Die Anwendung ist sofort einsatzbereit
