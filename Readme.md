@@ -4,9 +4,9 @@
 
 Ein Account Manager für League of Legends mit Auto-Login Funktion.
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.2.2-blue.svg)
 ![.NET](https://img.shields.io/badge/.NET-9.0-purple.svg)
-![License](https://img.shields.io/badge/license-MIT-green.svg)
+![License](https://img.shields.io/badge/license-BSD-green.svg)
 
 ## ✨ Features
 
@@ -43,4 +43,5 @@ Wenn du diese Software:
 - ❌ Binaries ohne Attribution verteilen
 
 ## 👤 Original-Autor
+
 **Tuc2300** - [@Tuc2300](https://github.com/Tuc2300)
