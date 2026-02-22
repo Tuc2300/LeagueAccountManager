@@ -11,6 +11,9 @@
   <ItemGroup>
     <None Remove="index.html" />
     <None Remove="LeagueIcon.png" />
+    <None Remove="LICENSE" />
+    <None Remove="Readme.md" />
+    <None Remove="screenshot.png" />
     <None Remove="script.js" />
     <None Remove="style.css" />
   </ItemGroup>
@@ -23,6 +26,15 @@
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
     <Content Include="LeagueIcon.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="LICENSE">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Readme.md">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="screenshot.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
     <Content Include="script.js">
@@ -40,10 +52,6 @@
     <PackageReference Include="Microsoft.Web.WebView2.DevToolsProtocolExtension" Version="1.0.2901" />
     <PackageReference Include="System.Text.Json" Version="9.0.9" />
   </ItemGroup>
-
-  <ItemGroup>
-    <Folder Include="controller\" />
-  </ItemGroup>
 	
 <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -57,6 +65,12 @@
     <AssemblyVersion>1.0.0</AssemblyVersion>
     <FileVersion>1.0.0</FileVersion>
     <ApplicationIcon>icon.ico</ApplicationIcon>
+</PropertyGroup>
+	
+<PropertyGroup>
+    <Copyright>Copyright © 2026 Tuc2300. All rights reserved.</Copyright>
+    <Company>Tuc2300</Company>
+    <Product>League Account Manager</Product>
 </PropertyGroup>
 
 </Project>

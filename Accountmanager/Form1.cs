@@ -1,4 +1,9 @@
-﻿using System.Diagnostics;
+﻿// League Account Manager
+// Copyright (c) 2026 Tuc2300. All rights reserved.
+// Licensed under the BSD 3-Clause License: https://github.com/Tuc2300/LeagueAccountManager/blob/main/LICENSE
+
+using System.Diagnostics;
+using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -7,16 +12,18 @@ using FlaUI.Core;
 using FlaUI.Core.AutomationElements;
 using FlaUI.UIA3;
 using Microsoft.Web.WebView2.Core;
+using static FlaUI.Core.FrameworkAutomationElementBase;
+using Label = System.Windows.Forms.Label;
+using ProgressBar = System.Windows.Forms.ProgressBar;
 
 namespace Accountmanager
 {
     public partial class Form1 : Form
     {
-        private const string CURRENT_VERSION = "1.0.0";
+        private const string CURRENT_VERSION = "1.2.2";
         private const string GITHUB_REPO_OWNER = "Tuc2300";
         private const string GITHUB_REPO_NAME = "LeagueAccountManager";
         private List<Account> accounts = new List<Account>();
-        private static readonly byte[] EncryptionKey = Encoding.UTF8.GetBytes("YourSecretKey123YourSecretKey123"); // 32 Bytes für AES-256
 
         public Form1()
         {
@@ -30,10 +37,8 @@ namespace Accountmanager
         {
             await webView21.EnsureCoreWebView2Async(null);
 
-            // WebMessage Handler registrieren
             webView21.CoreWebView2.WebMessageReceived += CoreWebView2_WebMessageReceived;
 
-            // Lokale HTML laden
             string htmlPath = Path.Combine(System.Windows.Forms.Application.StartupPath, "index.html");
             webView21.Source = new Uri(htmlPath);
         }
@@ -44,11 +49,9 @@ namespace Accountmanager
             {
                 using (var client = new HttpClient())
                 {
-                    // User-Agent ist Pflicht für GitHub API
                     client.DefaultRequestHeaders.Add("User-Agent", "LeagueAccountManager");
                     client.Timeout = TimeSpan.FromSeconds(10);
 
-                    // GitHub API - Holt die neueste Release-Info
                     string apiUrl = $"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/releases/latest";
 
                     var response = await client.GetStringAsync(apiUrl);
@@ -57,20 +60,15 @@ namespace Accountmanager
                     if (release == null || release.TagName == null)
                         return;
 
-                    // Entferne "v" Prefix falls vorhanden (v1.0.0 -> 1.0.0)
                     string latestVersion = release.TagName.TrimStart('v');
 
-                    // Vergleiche Versionen
                     if (IsNewerVersion(latestVersion, CURRENT_VERSION))
                     {
-                        // Finde die .exe oder .zip Datei
                         var asset = release.Assets?.FirstOrDefault(a =>
-                            a.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ||
                             a.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase));
 
                         if (asset != null)
                         {
-                            // Zeige Update-Dialog
                             ShowUpdateDialog(latestVersion, release.Body ?? "Keine Details verfügbar", asset.BrowserDownloadUrl);
                         }
                     }
@@ -78,19 +76,18 @@ namespace Accountmanager
             }
             catch (Exception ex)
             {
-                // Fehler beim Update-Check nicht anzeigen (nicht kritisch)
                 System.Diagnostics.Debug.WriteLine($"Update-Check fehlgeschlagen: {ex.Message}");
             }
         }
 
-        private void ShowUpdateDialog(string newVersion, string changelog, string downloadUrl)
+        private async void ShowUpdateDialog(string newVersion, string changelog, string downloadUrl)
         {
             var result = MessageBox.Show(
                 $"🎉 Neue Version verfügbar!\n\n" +
                 $"Installierte Version: {CURRENT_VERSION}\n" +
                 $"Neue Version: {newVersion}\n\n" +
                 $"Änderungen:\n{changelog}\n\n" +
-                $"Möchtest du die neue Version jetzt herunterladen?",
+                $"Möchtest du die neue Version jetzt installieren?",
                 "Update verfügbar",
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Information
@@ -98,40 +95,235 @@ namespace Accountmanager
 
             if (result == DialogResult.Yes)
             {
-                try
+                await DownloadAndInstallUpdate(newVersion, downloadUrl);
+            }
+        }
+
+        private async Task DownloadAndInstallUpdate(string newVersion, string downloadUrl)
+        {
+            Form progressForm = null;
+            Label progressLabel = null;
+            ProgressBar progressBar = null;
+
+            try
+            {
+                string tempPath = Path.Combine(Path.GetTempPath(), "LeagueAccountManager_Update");
+                Directory.CreateDirectory(tempPath);
+
+                string zipFile = Path.Combine(tempPath, $"LeagueAccountManager_{newVersion}.zip");
+                string extractPath = Path.Combine(tempPath, "extracted");
+
+                progressForm = new Form
                 {
-                    // Öffne Download-Link im Browser
-                    Process.Start(new ProcessStartInfo
-                    {
-                        FileName = downloadUrl,
-                        UseShellExecute = true
-                    });
+                    Text = "Update wird installiert...",
+                    Size = new Size(450, 150),
+                    FormBorderStyle = FormBorderStyle.FixedDialog,
+                    StartPosition = FormStartPosition.CenterScreen,
+                    MaximizeBox = false,
+                    MinimizeBox = false,
+                    ControlBox = false,
+                    TopMost = true
+                };
 
-                    // Optional: App schließen nach Download-Start
-                    var closeResult = MessageBox.Show(
-                        "Download wurde gestartet.\n\nMöchtest du die App jetzt beenden?",
-                        "Update",
-                        MessageBoxButtons.YesNo,
-                        MessageBoxIcon.Question
-                    );
+                progressLabel = new Label
+                {
+                    Text = "Download wird vorbereitet...",
+                    AutoSize = false,
+                    Size = new Size(410, 40),
+                    Location = new Point(20, 20),
+                    TextAlign = ContentAlignment.MiddleCenter,
+                    Font = new Font(progressForm.Font.FontFamily, 10)
+                };
 
-                    if (closeResult == DialogResult.Yes)
+                progressBar = new ProgressBar
+                {
+                    Location = new Point(20, 70),
+                    Size = new Size(410, 30),
+                    Style = ProgressBarStyle.Continuous
+                };
+
+                progressForm.Controls.Add(progressLabel);
+                progressForm.Controls.Add(progressBar);
+                progressForm.Show();
+                System.Windows.Forms.Application.DoEvents();
+
+                progressLabel.Text = "Lade Update herunter...";
+                System.Windows.Forms.Application.DoEvents();
+
+                using (var client = new HttpClient())
+                {
+                    client.Timeout = TimeSpan.FromMinutes(10);
+                    client.DefaultRequestHeaders.Add("User-Agent", "LeagueAccountManager");
+
+                    var response = await client.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead);
+                    response.EnsureSuccessStatusCode();
+
+                    var totalBytes = response.Content.Headers.ContentLength ?? 0;
+                    var buffer = new byte[8192];
+                    var totalRead = 0L;
+
+                    using (var contentStream = await response.Content.ReadAsStreamAsync())
+                    using (var fileStream = new FileStream(zipFile, FileMode.Create, FileAccess.Write, FileShare.None, 8192, true))
                     {
-                        System.Windows.Forms.Application.Exit();
+                        int bytesRead;
+                        while ((bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
+                        {
+                            await fileStream.WriteAsync(buffer, 0, bytesRead);
+                            totalRead += bytesRead;
+
+                            if (totalBytes > 0)
+                            {
+                                var percentage = (int)((totalRead * 100) / totalBytes);
+                                progressBar.Value = Math.Min(percentage, 100);
+
+                                double downloadedMB = totalRead / 1024.0 / 1024.0;
+                                double totalMB = totalBytes / 1024.0 / 1024.0;
+
+                                progressLabel.Text = $"Download: {percentage}% ({downloadedMB:F1} MB / {totalMB:F1} MB)";
+                                System.Windows.Forms.Application.DoEvents();
+                            }
+                        }
                     }
                 }
-                catch (Exception ex)
+
+                progressLabel.Text = "Extrahiere Update...";
+                progressBar.Style = ProgressBarStyle.Marquee;
+                System.Windows.Forms.Application.DoEvents();
+
+                await Task.Run(() =>
                 {
-                    MessageBox.Show($"Fehler beim Öffnen des Downloads:\n{ex.Message}", "Fehler", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    Directory.CreateDirectory(extractPath);
+                    ZipFile.ExtractToDirectory(zipFile, extractPath);
+                });
+
+                progressBar.Style = ProgressBarStyle.Continuous;
+                progressBar.Value = 100;
+
+                progressLabel.Text = "Bereite Installation vor...";
+                System.Windows.Forms.Application.DoEvents();
+
+                string updaterScript = CreateUpdateScript(extractPath, tempPath);
+
+                progressForm.Close();
+
+                var installResult = MessageBox.Show(
+                    "✅ Update wurde heruntergeladen!\n\n" +
+                    "Die Anwendung wird jetzt geschlossen und das Update installiert.\n\n" +
+                    "Möchtest du fortfahren?",
+                    "Update bereit",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question
+                );
+
+                if (installResult == DialogResult.Yes)
+                {
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = updaterScript,
+                        UseShellExecute = true,
+                        CreateNoWindow = false,
+                        WorkingDirectory = Path.GetDirectoryName(updaterScript)
+                    });
+
+                    System.Windows.Forms.Application.Exit();
+                }
+                else
+                {
+                    try
+                    {
+                        Directory.Delete(tempPath, true);
+                    }
+                    catch { }
                 }
             }
+            catch (Exception ex)
+            {
+                progressForm?.Close();
+
+                MessageBox.Show(
+                    $"❌ Fehler beim Update-Download:\n\n{ex.Message}\n\n" +
+                    $"Bitte lade das Update manuell von GitHub herunter.",
+                    "Fehler",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error
+                );
+
+                try
+                {
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = $"https://github.com/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/releases/latest",
+                        UseShellExecute = true
+                    });
+                }
+                catch { }
+            }
+        }
+
+        private string CreateUpdateScript(string extractPath, string tempPath)
+        {
+            string currentExePath = System.Windows.Forms.Application.ExecutablePath;
+            string currentDirectory = Path.GetDirectoryName(currentExePath);
+            string scriptPath = Path.Combine(tempPath, "update.bat");
+            string backupPath = Path.Combine(currentDirectory, "backup_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+
+            string script = $@"@echo off
+                chcp 65001 >nul
+                title League Account Manager - Update Installation
+                color 0A
+
+                echo.
+                echo ╔════════════════════════════════════════════════════════╗
+                echo ║   League Account Manager - Update Installation        ║
+                echo ╚════════════════════════════════════════════════════════╝
+                echo.
+
+                echo [1/5] Warte auf Anwendungsende...
+                timeout /t 3 /nobreak >nul
+
+                echo [2/5] Erstelle Backup...
+                if not exist ""{backupPath}"" mkdir ""{backupPath}""
+                xcopy ""{currentDirectory}\*.*"" ""{backupPath}\"" /E /Y /I /Q >nul 2>&1
+                echo ✓ Backup erstellt in: backup_{DateTime.Now.ToString("yyyyMMdd_HHmmss")}
+
+                echo [3/5] Installiere neue Version...
+                xcopy ""{extractPath}\*.*"" ""{currentDirectory}\"" /E /Y /I /Q
+                if errorlevel 1 (
+                    echo ✗ Fehler bei der Installation!
+                    echo Backup wird wiederhergestellt...
+                    xcopy ""{backupPath}\*.*"" ""{currentDirectory}\"" /E /Y /I /Q >nul 2>&1
+                    pause
+                    exit /b 1
+                )
+                echo ✓ Dateien aktualisiert
+
+                echo [4/5] Räume temporäre Dateien auf...
+                rd /s /q ""{tempPath}"" >nul 2>&1
+                echo ✓ Bereinigung abgeschlossen
+
+                echo [5/5] Starte Anwendung neu...
+                timeout /t 2 /nobreak >nul
+                start """" ""{currentExePath}""
+
+                echo.
+                echo ╔════════════════════════════════════════════════════════╗
+                echo ║           Update erfolgreich installiert! ✓           ║
+                echo ╚════════════════════════════════════════════════════════╝
+                echo.
+                echo Drücke eine beliebige Taste zum Beenden...
+                pause >nul
+
+                exit
+            ";
+
+            File.WriteAllText(scriptPath, script, Encoding.UTF8);
+            return scriptPath;
         }
 
         private bool IsNewerVersion(string latestVersion, string currentVersion)
         {
             try
             {
-                // Bereinige Versionen
                 latestVersion = latestVersion.Replace("v", "").Replace("V", "");
                 currentVersion = currentVersion.Replace("v", "").Replace("V", "");
 
@@ -143,64 +335,6 @@ namespace Accountmanager
             catch
             {
                 return false;
-            }
-        }
-
-        // Passwort verschlüsseln
-        private string EncryptPassword(string plainText)
-        {
-            using (Aes aes = Aes.Create())
-            {
-                aes.Key = EncryptionKey;
-                aes.GenerateIV();
-
-                ICryptoTransform encryptor = aes.CreateEncryptor(aes.Key, aes.IV);
-
-                using (MemoryStream msEncrypt = new MemoryStream())
-                {
-                    // IV am Anfang speichern
-                    msEncrypt.Write(aes.IV, 0, aes.IV.Length);
-
-                    using (CryptoStream csEncrypt = new CryptoStream(msEncrypt, encryptor, CryptoStreamMode.Write))
-                    using (StreamWriter swEncrypt = new StreamWriter(csEncrypt))
-                    {
-                        swEncrypt.Write(plainText);
-                    }
-
-                    return Convert.ToBase64String(msEncrypt.ToArray());
-                }
-            }
-        }
-
-        // Passwort entschlüsseln
-        private string DecryptPassword(string cipherText)
-        {
-            try
-            {
-                byte[] fullCipher = Convert.FromBase64String(cipherText);
-
-                using (Aes aes = Aes.Create())
-                {
-                    aes.Key = EncryptionKey;
-
-                    // IV aus den ersten 16 Bytes extrahieren
-                    byte[] iv = new byte[16];
-                    Array.Copy(fullCipher, 0, iv, 0, iv.Length);
-                    aes.IV = iv;
-
-                    ICryptoTransform decryptor = aes.CreateDecryptor(aes.Key, aes.IV);
-
-                    using (MemoryStream msDecrypt = new MemoryStream(fullCipher, iv.Length, fullCipher.Length - iv.Length))
-                    using (CryptoStream csDecrypt = new CryptoStream(msDecrypt, decryptor, CryptoStreamMode.Read))
-                    using (StreamReader srDecrypt = new StreamReader(csDecrypt))
-                    {
-                        return srDecrypt.ReadToEnd();
-                    }
-                }
-            }
-            catch
-            {
-                return cipherText; // Falls Entschlüsselung fehlschlägt, Originalwert zurückgeben
             }
         }
 
@@ -224,14 +358,13 @@ namespace Accountmanager
                     switch (action)
                     {
                         case "GET_ACCOUNTS":
-                            // Passwörter für JavaScript entschlüsseln
                             var decryptedAccounts = accounts.Select(a => new Account
                             {
                                 Id = a.Id,
                                 Name = a.Name,
                                 Tag = a.Tag,
                                 Username = a.Username,
-                                Password = DecryptPassword(a.Password),
+                                Password = SecureStorage.Decrypt(a.Password),
                                 Region = a.Region,
                                 Created = a.Created
                             }).ToList();
@@ -248,7 +381,7 @@ namespace Accountmanager
                                     Name = createData.GetProperty("name").GetString() ?? "",
                                     Tag = createData.GetProperty("tag").GetString() ?? "",
                                     Username = createData.GetProperty("username").GetString() ?? "",
-                                    Password = EncryptPassword(plainPassword), // Verschlüsselt speichern
+                                    Password = SecureStorage.Encrypt(plainPassword),
                                     Region = createData.GetProperty("region").GetString() ?? "",
                                     Id = accounts.Count > 0 ? accounts.Max(a => a.Id) + 1 : 1,
                                     Created = DateTime.Now.ToString("yyyy-MM-dd")
@@ -256,7 +389,6 @@ namespace Accountmanager
                                 accounts.Add(newAccount);
                                 SaveAccounts();
 
-                                // Entschlüsseltes Passwort für Response
                                 responseData = new Account
                                 {
                                     Id = newAccount.Id,
@@ -282,11 +414,10 @@ namespace Accountmanager
                                     account.Name = updateData.GetProperty("name").GetString() ?? account.Name;
                                     account.Tag = updateData.GetProperty("tag").GetString() ?? account.Tag;
                                     account.Username = updateData.GetProperty("username").GetString() ?? account.Username;
-                                    account.Password = EncryptPassword(plainPassword); // Verschlüsselt speichern
+                                    account.Password = SecureStorage.Encrypt(plainPassword);
                                     account.Region = updateData.GetProperty("region").GetString() ?? account.Region;
                                     SaveAccounts();
 
-                                    // Entschlüsseltes Passwort für Response
                                     responseData = new Account
                                     {
                                         Id = account.Id,
@@ -302,6 +433,7 @@ namespace Accountmanager
                                 {
                                     success = false;
                                     error = "Account nicht gefunden";
+                                    break;
                                 }
                             }
                             break;
@@ -323,7 +455,6 @@ namespace Accountmanager
                                 string password = loginData.GetProperty("password").GetString() ?? "";
                                 string region = loginData.GetProperty("region").GetString() ?? "";
 
-                                // League of Legends starten und einloggen
                                 StartLeagueAndLogin(username, password, region);
 
                                 responseData = new { success = true, message = "Login gestartet" };
@@ -343,7 +474,6 @@ namespace Accountmanager
                     MessageBox.Show($"Fehler bei Aktion {action}: {ex.Message}\n{ex.StackTrace}");
                 }
 
-                // Response zurück an JavaScript
                 var response = new
                 {
                     messageId = messageId,
@@ -389,7 +519,6 @@ namespace Accountmanager
 
                 Process.Start(startInfo);
 
-                // Starte Auto-Login in separatem Thread - KEINE MessageBox hier!
                 Task.Run(() => PerformAutoLogin(username, password, region));
             }
             catch (Exception ex)
@@ -402,10 +531,8 @@ namespace Accountmanager
         {
             try
             {
-                // Log für Debug
                 System.Diagnostics.Debug.WriteLine("Auto-Login gestartet...");
 
-                // Warte bis Riot Client Prozess gestartet ist (max 90 Sekunden)
                 int maxWaitTime = 90000;
                 int waitedTime = 0;
                 Process riotProcess = null;
@@ -500,7 +627,6 @@ namespace Accountmanager
 
                         System.Threading.Thread.Sleep(3000);
 
-                        // Versuche Felder zu finden
                         try
                         {
                             System.Diagnostics.Debug.WriteLine("Suche UI Elemente...");
@@ -629,7 +755,6 @@ namespace Accountmanager
                 {
                     this.Invoke((MethodInvoker)delegate
                     {
-                        // Verwende Toast statt MessageBox!
                         webView21.CoreWebView2.PostWebMessageAsString($"{{\"type\":\"toast\",\"message\":\"{message}\",\"level\":\"info\"}}");
                     });
                 }
@@ -652,7 +777,6 @@ namespace Accountmanager
 
         private string FindRiotClient()
         {
-            // Verwende gecachten Pfad
             if (!string.IsNullOrEmpty(cachedRiotClientPath) && File.Exists(cachedRiotClientPath))
             {
                 return cachedRiotClientPath;
@@ -660,7 +784,6 @@ namespace Accountmanager
 
             try
             {
-                // Durchsuche alle Laufwerke
                 DriveInfo[] drives = DriveInfo.GetDrives();
 
                 foreach (DriveInfo drive in drives)
@@ -732,7 +855,7 @@ namespace Accountmanager
                         Name = "TestAccount",
                         Tag = "EUW1",
                         Username = "test@example.com",
-                        Password = EncryptPassword("Test123!"),
+                        Password = SecureStorage.Encrypt("Test123!"),
                         Region = "euw",
                         Created = DateTime.Now.ToString("yyyy-MM-dd")
                     }
@@ -756,10 +879,57 @@ namespace Accountmanager
             }
         }
 
+        private bool _aboutShown = false;
+
+        private void ShowAbout()
+        {
+            MessageBox.Show(
+                "🎮 **League Account Manager v" + CURRENT_VERSION + "**\n\n" +
+                "© 2026 **Tuc2300**. Alle Rechte vorbehalten.\n\n" +
+                "**BSD 3-Clause License**\n" +
+                "• Attribution erforderlich\n" +
+                "• Repository: https://github.com/Tuc2300/LeagueAccountManager\n\n" +
+                "⚠️ **Copyright darf nicht entfernt werden!**\n" +
+                "   Siehe LICENSE Datei für Details.",
+                "Über League Account Manager",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information
+            );
+        }
+
         private void Form1_Load(object sender, EventArgs e)
         {
+            string flagFile = Path.Combine(System.Windows.Forms.Application.StartupPath, "LeagueAccountManager.flag");
 
+            System.Diagnostics.Debug.WriteLine($"Flag file exists: {File.Exists(flagFile)}");
+            System.Diagnostics.Debug.WriteLine($"Flag file path: {flagFile}");
+
+            if (!File.Exists(flagFile))
+            {
+                System.Diagnostics.Debug.WriteLine("Showing About - flag missing");
+                ShowAbout();
+
+                try
+                {
+                    File.WriteAllText(flagFile, $"About shown: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                    File.SetAttributes(flagFile, FileAttributes.Hidden | FileAttributes.System);
+                    System.Diagnostics.Debug.WriteLine("Flag created successfully");
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Flag creation failed: {ex.Message}");
+                }
+            }
+            else
+            {
+                System.Diagnostics.Debug.WriteLine("About skipped - flag exists");
+            }
+
+            LoadAccounts();
+            InitializeAsync();
+            _ = CheckForUpdatesAsync();
         }
+
     }
 
     public class Account

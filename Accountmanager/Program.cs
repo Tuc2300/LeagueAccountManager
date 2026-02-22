@@ -1,3 +1,7 @@
+// League Account Manager
+// Copyright (c) 2026 Tuc2300. All rights reserved.
+// Licensed under the BSD 3-Clause License: https://github.com/Tuc2300/LeagueAccountManager/blob/main/LICENSE
+
 namespace Accountmanager
 {
     internal static class Program
