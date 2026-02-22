@@ -312,7 +312,6 @@ h1 {
         margin-bottom: 10px;
     }
 
-/* Media Queries */
 @media (max-width: 1399px) {
     .btn-action .btn-text {
         display: none !important;
@@ -352,7 +351,6 @@ h1 {
     }
 }
 
-/* Modal Styles */
 .modal {
     display: none;
     position: fixed;
@@ -566,7 +564,6 @@ h1 {
         box-shadow: 0 5px 15px rgba(239, 68, 68, 0.4);
     }
 
-/* Toast Notification */
 .toast {
     position: fixed;
     top: 30px;
@@ -609,7 +606,6 @@ h1 {
         border: 1px solid #c084fc;
     }
 
-/* Animations */
 @keyframes fadeIn {
     from {
         opacity: 0;

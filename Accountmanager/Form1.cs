@@ -1,7 +1,8 @@
-using System.Diagnostics;
+ï»¿using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using FlaUI.Core;
 using FlaUI.Core.AutomationElements;
 using FlaUI.UIA3;
@@ -11,15 +12,18 @@ namespace Accountmanager
 {
     public partial class Form1 : Form
     {
+        private const string CURRENT_VERSION = "1.0.0";
+        private const string GITHUB_REPO_OWNER = "Tuc2300";
+        private const string GITHUB_REPO_NAME = "LeagueAccountManager";
         private List<Account> accounts = new List<Account>();
-        private static readonly byte[] EncryptionKey = Encoding.UTF8.GetBytes("YourSecretKey123YourSecretKey123"); // 32 Bytes für AES-256
+        private static readonly byte[] EncryptionKey = Encoding.UTF8.GetBytes("YourSecretKey123YourSecretKey123"); // 32 Bytes fÃ¼r AES-256
 
         public Form1()
         {
             InitializeComponent();
             LoadAccounts();
             InitializeAsync();
-            _ = CheckForUpdates();
+            _ = CheckForUpdatesAsync();
         }
 
         async void InitializeAsync()
@@ -34,52 +38,115 @@ namespace Accountmanager
             webView21.Source = new Uri(htmlPath);
         }
 
-        private async Task CheckForUpdates()
+        private async Task CheckForUpdatesAsync()
         {
             try
             {
                 using (var client = new HttpClient())
                 {
+                    // User-Agent ist Pflicht fÃ¼r GitHub API
                     client.DefaultRequestHeaders.Add("User-Agent", "LeagueAccountManager");
+                    client.Timeout = TimeSpan.FromSeconds(10);
 
-                    // GitHub API - Latest Release
-                    string apiUrl = "https://api.github.com/repos/DEIN-USERNAME/DEIN-REPO/releases/latest";
+                    // GitHub API - Holt die neueste Release-Info
+                    string apiUrl = $"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/releases/latest";
 
                     var response = await client.GetStringAsync(apiUrl);
-                    var release = JsonSerializer.Deserialize<JsonElement>(response);
+                    var release = JsonSerializer.Deserialize<GitHubRelease>(response);
 
-                    string latestVersion = release.GetProperty("tag_name").GetString().Replace("v", "");
-                    string currentVersion = "1.0.0"; // Deine aktuelle Version
+                    if (release == null || release.TagName == null)
+                        return;
 
-                    if (latestVersion != currentVersion)
+                    // Entferne "v" Prefix falls vorhanden (v1.0.0 -> 1.0.0)
+                    string latestVersion = release.TagName.TrimStart('v');
+
+                    // Vergleiche Versionen
+                    if (IsNewerVersion(latestVersion, CURRENT_VERSION))
                     {
-                        string downloadUrl = release.GetProperty("assets")[0].GetProperty("browser_download_url").GetString();
+                        // Finde die .exe oder .zip Datei
+                        var asset = release.Assets?.FirstOrDefault(a =>
+                            a.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ||
+                            a.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase));
 
-                        var result = MessageBox.Show(
-                            $"Neue Version {latestVersion} verfügbar!\n\nMöchtest du jetzt updaten?",
-                            "Update verfügbar",
-                            MessageBoxButtons.YesNo,
-                            MessageBoxIcon.Information
-                        );
-
-                        if (result == DialogResult.Yes)
+                        if (asset != null)
                         {
-                            System.Diagnostics.Process.Start(new ProcessStartInfo
-                            {
-                                FileName = downloadUrl,
-                                UseShellExecute = true
-                            });
+                            // Zeige Update-Dialog
+                            ShowUpdateDialog(latestVersion, release.Body ?? "Keine Details verfÃ¼gbar", asset.BrowserDownloadUrl);
                         }
                     }
                 }
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Update-Check fehlgeschlagen: {ex.Message}");
+                // Fehler beim Update-Check nicht anzeigen (nicht kritisch)
+                System.Diagnostics.Debug.WriteLine($"Update-Check fehlgeschlagen: {ex.Message}");
             }
         }
 
-        // Passwort verschlüsseln
+        private void ShowUpdateDialog(string newVersion, string changelog, string downloadUrl)
+        {
+            var result = MessageBox.Show(
+                $"ðŸŽ‰ Neue Version verfÃ¼gbar!\n\n" +
+                $"Installierte Version: {CURRENT_VERSION}\n" +
+                $"Neue Version: {newVersion}\n\n" +
+                $"Ã„nderungen:\n{changelog}\n\n" +
+                $"MÃ¶chtest du die neue Version jetzt herunterladen?",
+                "Update verfÃ¼gbar",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Information
+            );
+
+            if (result == DialogResult.Yes)
+            {
+                try
+                {
+                    // Ã–ffne Download-Link im Browser
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = downloadUrl,
+                        UseShellExecute = true
+                    });
+
+                    // Optional: App schlieÃŸen nach Download-Start
+                    var closeResult = MessageBox.Show(
+                        "Download wurde gestartet.\n\nMÃ¶chtest du die App jetzt beenden?",
+                        "Update",
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Question
+                    );
+
+                    if (closeResult == DialogResult.Yes)
+                    {
+                        System.Windows.Forms.Application.Exit();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Fehler beim Ã–ffnen des Downloads:\n{ex.Message}", "Fehler", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+        }
+
+        private bool IsNewerVersion(string latestVersion, string currentVersion)
+        {
+            try
+            {
+                // Bereinige Versionen
+                latestVersion = latestVersion.Replace("v", "").Replace("V", "");
+                currentVersion = currentVersion.Replace("v", "").Replace("V", "");
+
+                var latest = new Version(latestVersion);
+                var current = new Version(currentVersion);
+
+                return latest > current;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        // Passwort verschlÃ¼sseln
         private string EncryptPassword(string plainText)
         {
             using (Aes aes = Aes.Create())
@@ -105,7 +172,7 @@ namespace Accountmanager
             }
         }
 
-        // Passwort entschlüsseln
+        // Passwort entschlÃ¼sseln
         private string DecryptPassword(string cipherText)
         {
             try
@@ -133,7 +200,7 @@ namespace Accountmanager
             }
             catch
             {
-                return cipherText; // Falls Entschlüsselung fehlschlägt, Originalwert zurückgeben
+                return cipherText; // Falls EntschlÃ¼sselung fehlschlÃ¤gt, Originalwert zurÃ¼ckgeben
             }
         }
 
@@ -157,7 +224,7 @@ namespace Accountmanager
                     switch (action)
                     {
                         case "GET_ACCOUNTS":
-                            // Passwörter für JavaScript entschlüsseln
+                            // PasswÃ¶rter fÃ¼r JavaScript entschlÃ¼sseln
                             var decryptedAccounts = accounts.Select(a => new Account
                             {
                                 Id = a.Id,
@@ -181,7 +248,7 @@ namespace Accountmanager
                                     Name = createData.GetProperty("name").GetString() ?? "",
                                     Tag = createData.GetProperty("tag").GetString() ?? "",
                                     Username = createData.GetProperty("username").GetString() ?? "",
-                                    Password = EncryptPassword(plainPassword), // Verschlüsselt speichern
+                                    Password = EncryptPassword(plainPassword), // VerschlÃ¼sselt speichern
                                     Region = createData.GetProperty("region").GetString() ?? "",
                                     Id = accounts.Count > 0 ? accounts.Max(a => a.Id) + 1 : 1,
                                     Created = DateTime.Now.ToString("yyyy-MM-dd")
@@ -189,7 +256,7 @@ namespace Accountmanager
                                 accounts.Add(newAccount);
                                 SaveAccounts();
 
-                                // Entschlüsseltes Passwort für Response
+                                // EntschlÃ¼sseltes Passwort fÃ¼r Response
                                 responseData = new Account
                                 {
                                     Id = newAccount.Id,
@@ -215,11 +282,11 @@ namespace Accountmanager
                                     account.Name = updateData.GetProperty("name").GetString() ?? account.Name;
                                     account.Tag = updateData.GetProperty("tag").GetString() ?? account.Tag;
                                     account.Username = updateData.GetProperty("username").GetString() ?? account.Username;
-                                    account.Password = EncryptPassword(plainPassword); // Verschlüsselt speichern
+                                    account.Password = EncryptPassword(plainPassword); // VerschlÃ¼sselt speichern
                                     account.Region = updateData.GetProperty("region").GetString() ?? account.Region;
                                     SaveAccounts();
 
-                                    // Entschlüsseltes Passwort für Response
+                                    // EntschlÃ¼sseltes Passwort fÃ¼r Response
                                     responseData = new Account
                                     {
                                         Id = account.Id,
@@ -276,7 +343,7 @@ namespace Accountmanager
                     MessageBox.Show($"Fehler bei Aktion {action}: {ex.Message}\n{ex.StackTrace}");
                 }
 
-                // Response zurück an JavaScript
+                // Response zurÃ¼ck an JavaScript
                 var response = new
                 {
                     messageId = messageId,
@@ -335,7 +402,7 @@ namespace Accountmanager
         {
             try
             {
-                // Log für Debug
+                // Log fÃ¼r Debug
                 System.Diagnostics.Debug.WriteLine("Auto-Login gestartet...");
 
                 // Warte bis Riot Client Prozess gestartet ist (max 90 Sekunden)
@@ -447,7 +514,7 @@ namespace Accountmanager
 
                             if (usernameField != null)
                             {
-                                System.Diagnostics.Debug.WriteLine("Username-Feld gefunden, fülle aus...");
+                                System.Diagnostics.Debug.WriteLine("Username-Feld gefunden, fÃ¼lle aus...");
                                 try
                                 {
                                     usernameField.Focus();
@@ -484,12 +551,12 @@ namespace Accountmanager
                                     catch
                                     {
                                         SendKeys.SendWait("{ENTER}");
-                                        System.Diagnostics.Debug.WriteLine("Enter gedrückt (Fallback)");
+                                        System.Diagnostics.Debug.WriteLine("Enter gedrÃ¼ckt (Fallback)");
                                     }
                                 }
                                 else
                                 {
-                                    System.Diagnostics.Debug.WriteLine("Login Button nicht gefunden, drücke Enter");
+                                    System.Diagnostics.Debug.WriteLine("Login Button nicht gefunden, drÃ¼cke Enter");
                                     SendKeys.SendWait("{ENTER}");
                                 }
 
@@ -704,5 +771,35 @@ namespace Accountmanager
         public string Password { get; set; } = "";
         public string Region { get; set; } = "";
         public string Created { get; set; } = "";
+    }
+
+    public class GitHubRelease
+    {
+        [JsonPropertyName("tag_name")]
+        public string TagName { get; set; }
+
+        [JsonPropertyName("name")]
+        public string Name { get; set; }
+
+        [JsonPropertyName("body")]
+        public string Body { get; set; }
+
+        [JsonPropertyName("html_url")]
+        public string HtmlUrl { get; set; }
+
+        [JsonPropertyName("assets")]
+        public List<GitHubAsset> Assets { get; set; }
+    }
+
+    public class GitHubAsset
+    {
+        [JsonPropertyName("name")]
+        public string Name { get; set; }
+
+        [JsonPropertyName("browser_download_url")]
+        public string BrowserDownloadUrl { get; set; }
+
+        [JsonPropertyName("size")]
+        public long Size { get; set; }
     }
 }
