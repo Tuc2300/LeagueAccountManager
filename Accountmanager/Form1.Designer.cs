@@ -1,25 +1,11 @@
 ﻿namespace Accountmanager
 {
-    public partial class Form1 : Form
+    partial class Form1 : Form
     {
         /// <summary>
         ///  Required designer variable.
         /// </summary>
         private System.ComponentModel.IContainer components = null;
-
-        public Form1()
-        {
-            InitializeComponent();
-            InitializeAsync();
-        }
-
-        async void InitializeAsync()
-        {
-            await webView21.EnsureCoreWebView2Async(null);
-
-            string htmlPath = Path.Combine(Application.StartupPath, "index.html");
-            webView21.Source = new Uri(htmlPath);
-        }
 
         /// <summary>
         ///  Clean up any resources being used.
@@ -42,29 +28,27 @@
         /// </summary>
         private void InitializeComponent()
         {
+            System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(Form1));
             webView21 = new Microsoft.Web.WebView2.WinForms.WebView2();
             ((System.ComponentModel.ISupportInitialize)webView21).BeginInit();
             SuspendLayout();
             // 
             // webView21
             // 
+            resources.ApplyResources(webView21, "webView21");
             webView21.AllowExternalDrop = true;
             webView21.CreationProperties = null;
             webView21.DefaultBackgroundColor = Color.White;
-            webView21.Location = new Point(380, 204);
             webView21.Name = "webView21";
-            webView21.Size = new Size(75, 23);
-            webView21.TabIndex = 0;
             webView21.ZoomFactor = 1D;
             // 
             // Form1
             // 
-            AutoScaleDimensions = new SizeF(7F, 15F);
+            resources.ApplyResources(this, "$this");
             AutoScaleMode = AutoScaleMode.Font;
-            ClientSize = new Size(800, 450);
             Controls.Add(webView21);
             Name = "Form1";
-            Text = "Form1";
+            Load += Form1_Load;
             ((System.ComponentModel.ISupportInitialize)webView21).EndInit();
             ResumeLayout(false);
         }

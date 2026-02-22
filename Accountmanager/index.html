@@ -3,56 +3,119 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebView2 Test</title>
-    <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            margin: 0;
-        }
-
-        .container {
-            text-align: center;
-            background: rgba(255, 255, 255, 0.1);
-            padding: 40px;
-            border-radius: 15px;
-            backdrop-filter: blur(10px);
-        }
-
-        button {
-            background: #fff;
-            color: #667eea;
-            border: none;
-            padding: 15px 30px;
-            font-size: 16px;
-            border-radius: 8px;
-            cursor: pointer;
-            margin-top: 20px;
-        }
-
-            button:hover {
-                transform: scale(1.05);
-                transition: 0.2s;
-            }
-    </style>
+    <title>Account Manager</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://kit.fontawesome.com/1aa9e06078.js" crossorigin="anonymous"></script>
 </head>
 <body>
     <div class="container">
-        <h1>🚀 WebView2 läuft!</h1>
-        <p>Deine HTML/CSS/JS-App funktioniert perfekt.</p>
-        <button onclick="testClick()">Klick mich!</button>
-        <p id="result"></p>
+        <header>
+            <h1><i class="fas fa-user-shield"></i> Account Manager</h1>
+            <button id="addBtn" class="btn-add">
+                <i class="fas fa-plus"></i> Neuer Account
+            </button>
+        </header>
+
+        <div class="search-box">
+            <i class="fas fa-search"></i>
+            <input type="text" id="searchInput" placeholder="Accounts durchsuchen...">
+        </div>
+
+        <div class="account-list" id="accountList">
+            <!-- Wird dynamisch befüllt -->
+        </div>
     </div>
 
-    <script>
-        function testClick() {
-            document.getElementById('result').innerHTML = '✅ JavaScript funktioniert!';
-        }
-    </script>
+    <!-- Modal für Account erstellen/bearbeiten -->
+    <div id="accountModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalTitle">Neuer Account</h2>
+                <button class="modal-close" onclick="closeModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label><i class="fas fa-tag"></i> Name</label>
+                    <input type="text" id="inputName" placeholder="z.B. MeinSummonerName">
+                </div>
+                <div class="form-group">
+                    <label><i class="fas fa-hashtag"></i> Tag</label>
+                    <input type="text" id="inputTag" placeholder="z.B. EUW1">
+                </div>
+                <div class="form-group">
+                    <label><i class="fas fa-user"></i> Username / Email</label>
+                    <input type="text" id="inputUsername" placeholder="z.B. user@example.com">
+                </div>
+                <div class="form-group">
+                    <label><i class="fas fa-lock"></i> Passwort</label>
+                    <div class="password-input-group">
+                        <input type="password" id="inputPassword" placeholder="••••••••">
+                        <button class="password-toggle-input" onclick="togglePasswordInput()">
+                            <i class="fas fa-eye" id="inputEye"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label><i class="fas fa-globe"></i> Region</label>
+                    <select id="inputRegion">
+                        <option value="">Region auswählen...</option>
+                        <option value="euw">EU West</option>
+                        <option value="eune">EU Nordic & East</option>
+                        <option value="na">North America</option>
+                        <option value="kr">Korea</option>
+                        <option value="jp">Japan</option>
+                        <option value="br">Brazil</option>
+                        <option value="lan">LAN</option>
+                        <option value="las">LAS</option>
+                        <option value="oce">Oceania</option>
+                        <option value="tr">Turkey</option>
+                        <option value="ru">Russia</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-cancel" onclick="closeModal()">
+                    <i class="fas fa-times"></i> Abbrechen
+                </button>
+                <button class="btn-save" onclick="saveAccount()">
+                    <i class="fas fa-save"></i> Speichern
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal für Löschen-Bestätigung -->
+    <div id="deleteModal" class="modal">
+        <div class="modal-content modal-small">
+            <div class="modal-header">
+                <h2>Account löschen?</h2>
+                <button class="modal-close" onclick="closeDeleteModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <p>Möchtest du diesen Account wirklich löschen?</p>
+                <p class="delete-warning"><i class="fas fa-exclamation-triangle"></i> Diese Aktion kann nicht rückgängig gemacht werden.</p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-cancel" onclick="closeDeleteModal()">
+                    <i class="fas fa-times"></i> Abbrechen
+                </button>
+                <button class="btn-delete-confirm" onclick="confirmDelete()">
+                    <i class="fas fa-trash"></i> Löschen
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast">
+        <i id="toastIcon" class="fas fa-check-circle"></i>
+        <span id="toastMessage"></span>
+    </div>
+
+    <script src="script.js"></script>
 </body>
 </html>
