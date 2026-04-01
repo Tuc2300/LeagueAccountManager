@@ -198,22 +198,143 @@ async function autoLogin(id) {
     }
 
     try {
-        showToast('Starte League of Legends...', 'info');
+        openLoginProgress();
 
-        // Nachricht an C# Backend senden
         await sendMessageToCSharp('AUTO_LOGIN', {
             id: account.id,
             username: account.username,
             password: account.password,
             region: account.region
         });
-
-        showToast('Login wird durchgeführt...', 'success');
     } catch (error) {
         showToast('Fehler beim Auto-Login: ' + error.message, 'error');
         console.error(error);
     }
 }
+
+// Login Progress Modal
+function openLoginProgress() {
+    for (let i = 1; i <= 4; i++) {
+        const step = document.getElementById('loginStep' + i);
+        step.setAttribute('data-status', 'waiting');
+        step.querySelector('.step-icon').innerHTML = '<i class="fas fa-circle"></i>';
+    }
+    document.getElementById('loginStatusMessage').textContent = '';
+    document.getElementById('loginProgressClose').style.display = 'none';
+    document.getElementById('loginProgressModal').classList.add('show');
+}
+
+function closeLoginProgress() {
+    document.getElementById('loginProgressModal').classList.remove('show');
+}
+
+function updateLoginProgress(data) {
+    const { step, totalSteps, message, status } = data;
+
+    // Update all steps
+    for (let i = 1; i <= totalSteps; i++) {
+        const stepEl = document.getElementById('loginStep' + i);
+        if (!stepEl) continue;
+
+        if (status === 'error') {
+            if (i === step || (step === 0 && i === 1)) {
+                stepEl.setAttribute('data-status', 'error');
+                stepEl.querySelector('.step-icon').innerHTML = '<i class="fas fa-times-circle"></i>';
+            }
+        } else if (i < step) {
+            stepEl.setAttribute('data-status', 'done');
+            stepEl.querySelector('.step-icon').innerHTML = '<i class="fas fa-check-circle"></i>';
+        } else if (i === step) {
+            if (status === 'done') {
+                stepEl.setAttribute('data-status', 'done');
+                stepEl.querySelector('.step-icon').innerHTML = '<i class="fas fa-check-circle"></i>';
+            } else {
+                stepEl.setAttribute('data-status', 'active');
+                stepEl.querySelector('.step-icon').innerHTML = '<i class="fas fa-circle-notch fa-spin"></i>';
+            }
+        } else {
+            stepEl.setAttribute('data-status', 'waiting');
+            stepEl.querySelector('.step-icon').innerHTML = '<i class="fas fa-circle"></i>';
+        }
+    }
+
+    document.getElementById('loginStatusMessage').textContent = message || '';
+
+    if (status === 'done' || status === 'error') {
+        document.getElementById('loginProgressClose').style.display = '';
+    }
+}
+
+// Update Banner
+let pendingUpdateUrl = null;
+
+function showUpdateBanner(data) {
+    pendingUpdateUrl = data.downloadUrl;
+    document.getElementById('updateNewVersion').textContent = data.newVersion;
+    document.getElementById('updateBanner').style.display = '';
+    document.getElementById('updateProgressContainer').style.display = 'none';
+    document.querySelector('.btn-update-install').disabled = false;
+    document.querySelector('.btn-update-install').innerHTML = '<i class="fas fa-download"></i> Jetzt installieren';
+}
+
+function dismissUpdate() {
+    document.getElementById('updateBanner').style.display = 'none';
+}
+
+async function startUpdate() {
+    const btn = document.querySelector('.btn-update-install');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Wird heruntergeladen...';
+    document.getElementById('updateProgressContainer').style.display = '';
+    document.querySelector('.btn-update-dismiss').style.display = 'none';
+
+    try {
+        await sendMessageToCSharp('START_UPDATE', { downloadUrl: pendingUpdateUrl });
+    } catch (error) {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-download"></i> Erneut versuchen';
+        document.querySelector('.btn-update-dismiss').style.display = '';
+        showToast('Update fehlgeschlagen: ' + error.message, 'error');
+    }
+}
+
+function updateProgress(data) {
+    const fill = document.getElementById('updateProgressFill');
+    const text = document.getElementById('updateProgressText');
+    fill.style.width = data.percentage + '%';
+    text.textContent = data.message || '';
+}
+
+function updateReady() {
+    const btn = document.querySelector('.btn-update-install');
+    btn.innerHTML = '<i class="fas fa-check-circle"></i> App wird neu gestartet...';
+    document.getElementById('updateProgressFill').style.width = '100%';
+    document.getElementById('updateProgressText').textContent = 'Installation wird vorbereitet...';
+}
+
+// Global message listener for push messages from C#
+window.chrome.webview.addEventListener('message', (event) => {
+    const data = event.data;
+    if (!data || !data.type) return;
+
+    switch (data.type) {
+        case 'loginProgress':
+            updateLoginProgress(data);
+            break;
+        case 'updateAvailable':
+            showUpdateBanner(data);
+            break;
+        case 'updateProgress':
+            updateProgress(data);
+            break;
+        case 'updateReady':
+            updateReady();
+            break;
+        case 'toast':
+            showToast(data.message, data.level || 'info');
+            break;
+    }
+});
 
 
 // OP.GG öffnen

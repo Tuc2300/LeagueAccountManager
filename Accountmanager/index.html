@@ -110,6 +110,65 @@
         </div>
     </div>
 
+    <!-- Login Progress Modal -->
+    <div id="loginProgressModal" class="modal">
+        <div class="modal-content modal-small">
+            <div class="modal-header">
+                <h2><i class="fas fa-sign-in-alt"></i> Auto-Login</h2>
+            </div>
+            <div class="modal-body">
+                <div class="login-steps">
+                    <div class="login-step" id="loginStep1" data-status="waiting">
+                        <div class="step-icon"><i class="fas fa-circle"></i></div>
+                        <span>Riot Client starten</span>
+                    </div>
+                    <div class="login-step" id="loginStep2" data-status="waiting">
+                        <div class="step-icon"><i class="fas fa-circle"></i></div>
+                        <span>Warte auf Riot Client</span>
+                    </div>
+                    <div class="login-step" id="loginStep3" data-status="waiting">
+                        <div class="step-icon"><i class="fas fa-circle"></i></div>
+                        <span>Login-Daten senden</span>
+                    </div>
+                    <div class="login-step" id="loginStep4" data-status="waiting">
+                        <div class="step-icon"><i class="fas fa-circle"></i></div>
+                        <span>Abgeschlossen</span>
+                    </div>
+                </div>
+                <p id="loginStatusMessage" class="login-status"></p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-cancel" id="loginProgressClose" onclick="closeLoginProgress()" style="display:none;">
+                    <i class="fas fa-times"></i> Schlie&szlig;en
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Update Banner -->
+    <div id="updateBanner" class="update-banner" style="display:none;">
+        <div class="update-banner-content">
+            <div class="update-info">
+                <i class="fas fa-arrow-circle-up"></i>
+                <span>Version <strong id="updateNewVersion"></strong> ist verf&uuml;gbar!</span>
+            </div>
+            <div class="update-actions">
+                <button class="btn-update-install" onclick="startUpdate()">
+                    <i class="fas fa-download"></i> Jetzt installieren
+                </button>
+                <button class="btn-update-dismiss" onclick="dismissUpdate()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        </div>
+        <div id="updateProgressContainer" class="update-progress-container" style="display:none;">
+            <div class="update-progress-bar">
+                <div id="updateProgressFill" class="update-progress-fill" style="width:0%"></div>
+            </div>
+            <span id="updateProgressText" class="update-progress-text">Wird vorbereitet...</span>
+        </div>
+    </div>
+
     <!-- Toast Notification -->
     <div id="toast" class="toast">
         <i id="toastIcon" class="fas fa-check-circle"></i>
