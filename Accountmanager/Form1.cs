@@ -534,18 +534,30 @@ namespace Accountmanager
                 SendToFrontend(new { type = "loginProgress", step = 2, totalSteps = 4, message = "Riot Client gefunden!", status = "done" });
 
                 // Step 3: Try API login first, then fallback
-                SendToFrontend(new { type = "loginProgress", step = 3, totalSteps = 4, message = "Sende Login-Daten via Riot Client API...", status = "active" });
+                SendToFrontend(new { type = "loginProgress", step = 3, totalSteps = 4, message = "Verbinde mit Riot Client API...", status = "active" });
 
                 bool apiSuccess = await TryLoginViaRiotApi(username, password);
 
-                if (!apiSuccess)
+                if (apiSuccess)
+                {
+                    SendToFrontend(new { type = "loginProgress", step = 3, totalSteps = 4, message = "Login-Daten via API gesendet!", status = "done" });
+                }
+                else
                 {
                     SendToFrontend(new { type = "loginProgress", step = 3, totalSteps = 4, message = "API nicht verf\u00fcgbar, verwende UI-Automation...", status = "active" });
-                    await Task.Delay(1500);
-                    PerformFallbackLogin(riotProcess, username, password);
-                }
+                    await Task.Delay(1000);
 
-                SendToFrontend(new { type = "loginProgress", step = 3, totalSteps = 4, message = "Login-Daten gesendet!", status = "done" });
+                    try
+                    {
+                        PerformFallbackLogin(riotProcess, username, password);
+                        SendToFrontend(new { type = "loginProgress", step = 3, totalSteps = 4, message = "Login-Daten via UI-Automation gesendet!", status = "done" });
+                    }
+                    catch (Exception fallbackEx)
+                    {
+                        SendToFrontend(new { type = "loginProgress", step = 3, totalSteps = 4, message = $"Fallback fehlgeschlagen: {fallbackEx.Message}", status = "error" });
+                        return;
+                    }
+                }
 
                 // Step 4: Done
                 SendToFrontend(new { type = "loginProgress", step = 4, totalSteps = 4, message = "Login-Daten wurden erfolgreich eingegeben!", status = "done" });
@@ -564,25 +576,49 @@ namespace Accountmanager
                 if (lockfilePath == null) return false;
 
                 // Wait for lockfile to appear
-                int attempts = 0;
-                while (!File.Exists(lockfilePath) && attempts < 30)
+                int waitAttempts = 0;
+                while (!File.Exists(lockfilePath) && waitAttempts < 30)
                 {
                     await Task.Delay(1000);
-                    attempts++;
+                    waitAttempts++;
                 }
 
-                if (!File.Exists(lockfilePath)) return false;
+                if (!File.Exists(lockfilePath))
+                {
+                    System.Diagnostics.Debug.WriteLine("Lockfile nicht gefunden");
+                    return false;
+                }
 
-                // Wait a moment for the client to be ready
-                await Task.Delay(2000);
+                // Read lockfile with FileShare.ReadWrite (Riot Client keeps the file locked)
+                string lockfileContent;
+                try
+                {
+                    using (var fs = new FileStream(lockfilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                    using (var sr = new StreamReader(fs))
+                    {
+                        lockfileContent = sr.ReadToEnd().Trim();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Lockfile lesen fehlgeschlagen: {ex.Message}");
+                    return false;
+                }
 
-                // Parse lockfile: name:pid:port:token:protocol
-                string lockfileContent = File.ReadAllText(lockfilePath);
+                // Parse lockfile: "Riot Client:pid:port:token:protocol"
                 string[] parts = lockfileContent.Split(':');
-                if (parts.Length < 5) return false;
+                if (parts.Length < 4)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Lockfile Format ungueltig: {parts.Length} Teile");
+                    return false;
+                }
 
-                string port = parts[2];
-                string token = parts[3];
+                // Port and token are the last 3 fields (name can contain spaces)
+                // Format: name:pid:port:token:protocol
+                string port = parts[parts.Length - 3];
+                string token = parts[parts.Length - 2];
+
+                System.Diagnostics.Debug.WriteLine($"Riot API: Port={port}");
 
                 // Create HTTP client that ignores SSL errors (Riot uses self-signed cert)
                 var handler = new HttpClientHandler();
@@ -591,13 +627,61 @@ namespace Accountmanager
                 using var client = new HttpClient(handler);
                 string authToken = Convert.ToBase64String(Encoding.ASCII.GetBytes($"riot:{token}"));
                 client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", authToken);
-                client.Timeout = TimeSpan.FromSeconds(10);
+                client.Timeout = TimeSpan.FromSeconds(15);
 
-                string url = $"https://127.0.0.1:{port}/rso-auth/v1/session/credentials";
-                var body = new { username, password, persistLogin = false };
-                var jsonContent = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
+                string baseUrl = $"https://127.0.0.1:{port}";
 
-                var response = await client.PutAsync(url, jsonContent);
+                // Wait for the Riot Client API to be ready (retries with backoff)
+                bool apiReady = false;
+                for (int i = 0; i < 15; i++)
+                {
+                    try
+                    {
+                        var check = await client.GetAsync($"{baseUrl}/riotclient/auth-token");
+                        apiReady = true;
+                        System.Diagnostics.Debug.WriteLine($"Riot API erreichbar nach {i + 1} Versuchen");
+                        break;
+                    }
+                    catch
+                    {
+                        await Task.Delay(2000);
+                    }
+                }
+
+                if (!apiReady)
+                {
+                    System.Diagnostics.Debug.WriteLine("Riot API nicht erreichbar nach 15 Versuchen");
+                    return false;
+                }
+
+                // Wait a bit more for the login UI to be fully loaded
+                await Task.Delay(3000);
+
+                // Try sending credentials via the session credentials endpoint
+                string credUrl = $"{baseUrl}/rso-auth/v1/session/credentials";
+                var credBody = new { username, password, persistLogin = false };
+                var jsonContent = new StringContent(JsonSerializer.Serialize(credBody), Encoding.UTF8, "application/json");
+
+                var response = await client.PutAsync(credUrl, jsonContent);
+                System.Diagnostics.Debug.WriteLine($"Riot API credentials response: {(int)response.StatusCode} {response.StatusCode}");
+
+                if (response.IsSuccessStatusCode)
+                    return true;
+
+                // If PUT failed, try POST as fallback (some client versions differ)
+                jsonContent = new StringContent(JsonSerializer.Serialize(credBody), Encoding.UTF8, "application/json");
+                response = await client.PostAsync(credUrl, jsonContent);
+                System.Diagnostics.Debug.WriteLine($"Riot API credentials POST response: {(int)response.StatusCode} {response.StatusCode}");
+
+                if (response.IsSuccessStatusCode)
+                    return true;
+
+                // Try alternative v2 endpoint
+                string credUrlV2 = $"{baseUrl}/rso-auth/v2/authorizations";
+                jsonContent = new StringContent(JsonSerializer.Serialize(credBody), Encoding.UTF8, "application/json");
+                response = await client.PutAsync(credUrlV2, jsonContent);
+                System.Diagnostics.Debug.WriteLine($"Riot API v2 response: {(int)response.StatusCode} {response.StatusCode}");
+
                 return response.IsSuccessStatusCode;
             }
             catch (Exception ex)
@@ -609,24 +693,56 @@ namespace Accountmanager
 
         private string FindRiotClientLockfile()
         {
+            // Check multiple known locations for the Riot Client lockfile
+            var candidates = new List<string>();
+
+            // 1. AppData\Local location
             string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            string lockfilePath = Path.Combine(localAppData, "Riot Games", "Riot Client", "Config", "lockfile");
+            candidates.Add(Path.Combine(localAppData, "Riot Games", "Riot Client", "Config", "lockfile"));
 
-            if (File.Exists(lockfilePath)) return lockfilePath;
-
-            // Also check in the installation directory
+            // 2. Installation directory (relative to RiotClientServices.exe)
             if (!string.IsNullOrEmpty(cachedRiotClientPath))
             {
-                string installDir = Path.GetDirectoryName(Path.GetDirectoryName(cachedRiotClientPath));
-                if (installDir != null)
+                string riotClientDir = Path.GetDirectoryName(cachedRiotClientPath);
+                if (riotClientDir != null)
                 {
-                    string altPath = Path.Combine(installDir, "Config", "lockfile");
-                    if (File.Exists(altPath)) return altPath;
+                    // Same directory as EXE
+                    candidates.Add(Path.Combine(riotClientDir, "Config", "lockfile"));
+
+                    // One level up (Riot Games\Riot Client\Config\lockfile)
+                    string parentDir = Path.GetDirectoryName(riotClientDir);
+                    if (parentDir != null)
+                        candidates.Add(Path.Combine(parentDir, "Riot Client", "Config", "lockfile"));
                 }
             }
 
-            // Return expected path (we'll wait for it to appear)
-            return lockfilePath;
+            // 3. Common installation paths on all drives
+            foreach (var drive in DriveInfo.GetDrives())
+            {
+                if (drive.IsReady && drive.DriveType == DriveType.Fixed)
+                {
+                    candidates.Add(Path.Combine(drive.Name, @"Riot Games\Riot Client\Config\lockfile"));
+                    candidates.Add(Path.Combine(drive.Name, @"Program Files\Riot Games\Riot Client\Config\lockfile"));
+                    candidates.Add(Path.Combine(drive.Name, @"Program Files (x86)\Riot Games\Riot Client\Config\lockfile"));
+                }
+            }
+
+            // 4. ProgramData location
+            string programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+            candidates.Add(Path.Combine(programData, "Riot Games", "RiotClientInstalls.json"));
+
+            foreach (var path in candidates)
+            {
+                if (File.Exists(path))
+                {
+                    System.Diagnostics.Debug.WriteLine($"Lockfile gefunden: {path}");
+                    return path;
+                }
+            }
+
+            // Return most likely path (we'll wait for it to appear)
+            System.Diagnostics.Debug.WriteLine("Lockfile nicht vorhanden, warte auf Standardpfad...");
+            return candidates[0];
         }
 
         private void PerformFallbackLogin(Process riotProcess, string username, string password)
