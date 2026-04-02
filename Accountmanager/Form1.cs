@@ -26,6 +26,7 @@ namespace Accountmanager
         private string pendingUpdateChangelog = null;
         private string pendingUpdateDownloadUrl = null;
         private string pendingUpdateScript = null;
+        private DateTime loginStartTime;
 
         public Form1()
         {
@@ -478,6 +479,8 @@ namespace Accountmanager
 
                 SendToFrontend(new { type = "loginProgress", step = 1, totalSteps = 4, message = "Riot Client wird gestartet...", status = "active" });
 
+                loginStartTime = DateTime.UtcNow;
+
                 string workingDirectory = Path.GetDirectoryName(riotClientPath);
                 Process.Start(new ProcessStartInfo
                 {
@@ -575,71 +578,106 @@ namespace Accountmanager
                 string lockfilePath = FindRiotClientLockfile();
                 if (lockfilePath == null) return false;
 
-                // Wait for lockfile to appear
-                int waitAttempts = 0;
-                while (!File.Exists(lockfilePath) && waitAttempts < 30)
-                {
-                    await Task.Delay(1000);
-                    waitAttempts++;
-                }
+                // Wait for a FRESH lockfile (written after we started the Riot Client)
+                // This avoids reading stale lockfiles from previous sessions with dead ports
+                string lockfileContent = null;
+                string port = null;
+                string token = null;
 
-                if (!File.Exists(lockfilePath))
+                for (int attempt = 0; attempt < 30; attempt++)
                 {
-                    System.Diagnostics.Debug.WriteLine("Lockfile nicht gefunden");
-                    return false;
-                }
-
-                // Read lockfile with FileShare.ReadWrite (Riot Client keeps the file locked)
-                string lockfileContent;
-                try
-                {
-                    using (var fs = new FileStream(lockfilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
-                    using (var sr = new StreamReader(fs))
+                    if (File.Exists(lockfilePath))
                     {
-                        lockfileContent = sr.ReadToEnd().Trim();
+                        // Check if the lockfile was modified AFTER we started the client
+                        DateTime lockfileTime = File.GetLastWriteTimeUtc(lockfilePath);
+                        if (lockfileTime >= loginStartTime.AddSeconds(-5))
+                        {
+                            // Fresh lockfile - read it
+                            try
+                            {
+                                using (var fs = new FileStream(lockfilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                                using (var sr = new StreamReader(fs))
+                                {
+                                    lockfileContent = sr.ReadToEnd().Trim();
+                                }
+
+                                if (!string.IsNullOrEmpty(lockfileContent))
+                                {
+                                    // Parse: "Riot Client:pid:port:token:protocol"
+                                    string[] parts = lockfileContent.Split(':');
+                                    if (parts.Length >= 5)
+                                    {
+                                        port = parts[parts.Length - 3];
+                                        token = parts[parts.Length - 2];
+
+                                        // Validate PID matches a running Riot process
+                                        if (int.TryParse(parts[parts.Length - 4], out int lockfilePid))
+                                        {
+                                            try
+                                            {
+                                                var proc = Process.GetProcessById(lockfilePid);
+                                                if (proc != null && !proc.HasExited)
+                                                {
+                                                    System.Diagnostics.Debug.WriteLine($"Frische Lockfile: Port={port}, PID={lockfilePid}");
+                                                    break;
+                                                }
+                                            }
+                                            catch
+                                            {
+                                                // PID doesn't exist, lockfile is stale
+                                                port = null;
+                                                token = null;
+                                            }
+                                        }
+                                        else
+                                        {
+                                            // Can't parse PID, try anyway
+                                            System.Diagnostics.Debug.WriteLine($"Lockfile ohne PID-Validierung: Port={port}");
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                System.Diagnostics.Debug.WriteLine($"Lockfile lesen fehlgeschlagen: {ex.Message}");
+                            }
+                        }
+                        else
+                        {
+                            System.Diagnostics.Debug.WriteLine($"Lockfile ist veraltet (letzte Aenderung: {lockfileTime}, Start: {loginStartTime})");
+                        }
                     }
+
+                    await Task.Delay(1000);
                 }
-                catch (Exception ex)
+
+                if (port == null || token == null)
                 {
-                    System.Diagnostics.Debug.WriteLine($"Lockfile lesen fehlgeschlagen: {ex.Message}");
+                    System.Diagnostics.Debug.WriteLine("Keine frische Lockfile gefunden");
                     return false;
                 }
-
-                // Parse lockfile: "Riot Client:pid:port:token:protocol"
-                string[] parts = lockfileContent.Split(':');
-                if (parts.Length < 4)
-                {
-                    System.Diagnostics.Debug.WriteLine($"Lockfile Format ungueltig: {parts.Length} Teile");
-                    return false;
-                }
-
-                // Port and token are the last 3 fields (name can contain spaces)
-                // Format: name:pid:port:token:protocol
-                string port = parts[parts.Length - 3];
-                string token = parts[parts.Length - 2];
-
-                System.Diagnostics.Debug.WriteLine($"Riot API: Port={port}");
 
                 // Create HTTP client that ignores SSL errors (Riot uses self-signed cert)
                 var handler = new HttpClientHandler();
-                handler.ServerCertificateCustomValidationCallback = (message, cert, chain, errors) => true;
+                handler.ServerCertificateCustomValidationCallback = (msg, cert, chain, errors) => true;
 
                 using var client = new HttpClient(handler);
                 string authToken = Convert.ToBase64String(Encoding.ASCII.GetBytes($"riot:{token}"));
                 client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", authToken);
-                client.Timeout = TimeSpan.FromSeconds(15);
+                client.Timeout = TimeSpan.FromSeconds(10);
 
                 string baseUrl = $"https://127.0.0.1:{port}";
 
-                // Wait for the Riot Client API to be ready (retries with backoff)
+                // Quick connectivity check (max 5 attempts, fail fast)
                 bool apiReady = false;
-                for (int i = 0; i < 15; i++)
+                for (int i = 0; i < 5; i++)
                 {
                     try
                     {
                         var check = await client.GetAsync($"{baseUrl}/riotclient/auth-token");
                         apiReady = true;
-                        System.Diagnostics.Debug.WriteLine($"Riot API erreichbar nach {i + 1} Versuchen");
+                        System.Diagnostics.Debug.WriteLine($"API erreichbar nach {i + 1} Versuchen (Status: {check.StatusCode})");
                         break;
                     }
                     catch
@@ -650,39 +688,39 @@ namespace Accountmanager
 
                 if (!apiReady)
                 {
-                    System.Diagnostics.Debug.WriteLine("Riot API nicht erreichbar nach 15 Versuchen");
+                    System.Diagnostics.Debug.WriteLine("API nicht erreichbar");
                     return false;
                 }
 
-                // Wait a bit more for the login UI to be fully loaded
-                await Task.Delay(3000);
+                // Wait for login UI to load
+                await Task.Delay(2000);
 
-                // Try sending credentials via the session credentials endpoint
-                string credUrl = $"{baseUrl}/rso-auth/v1/session/credentials";
+                // Try credentials endpoints
                 var credBody = new { username, password, persistLogin = false };
+
+                // Attempt 1: PUT /rso-auth/v1/session/credentials
                 var jsonContent = new StringContent(JsonSerializer.Serialize(credBody), Encoding.UTF8, "application/json");
+                var response = await client.PutAsync($"{baseUrl}/rso-auth/v1/session/credentials", jsonContent);
+                System.Diagnostics.Debug.WriteLine($"PUT v1/session/credentials: {(int)response.StatusCode}");
+                if (response.IsSuccessStatusCode) return true;
 
-                var response = await client.PutAsync(credUrl, jsonContent);
-                System.Diagnostics.Debug.WriteLine($"Riot API credentials response: {(int)response.StatusCode} {response.StatusCode}");
-
-                if (response.IsSuccessStatusCode)
-                    return true;
-
-                // If PUT failed, try POST as fallback (some client versions differ)
+                // Attempt 2: POST /rso-auth/v1/session/credentials
                 jsonContent = new StringContent(JsonSerializer.Serialize(credBody), Encoding.UTF8, "application/json");
-                response = await client.PostAsync(credUrl, jsonContent);
-                System.Diagnostics.Debug.WriteLine($"Riot API credentials POST response: {(int)response.StatusCode} {response.StatusCode}");
+                response = await client.PostAsync($"{baseUrl}/rso-auth/v1/session/credentials", jsonContent);
+                System.Diagnostics.Debug.WriteLine($"POST v1/session/credentials: {(int)response.StatusCode}");
+                if (response.IsSuccessStatusCode) return true;
 
-                if (response.IsSuccessStatusCode)
-                    return true;
-
-                // Try alternative v2 endpoint
-                string credUrlV2 = $"{baseUrl}/rso-auth/v2/authorizations";
+                // Attempt 3: PUT /rso-auth/v2/authorizations
                 jsonContent = new StringContent(JsonSerializer.Serialize(credBody), Encoding.UTF8, "application/json");
-                response = await client.PutAsync(credUrlV2, jsonContent);
-                System.Diagnostics.Debug.WriteLine($"Riot API v2 response: {(int)response.StatusCode} {response.StatusCode}");
+                response = await client.PutAsync($"{baseUrl}/rso-auth/v2/authorizations", jsonContent);
+                System.Diagnostics.Debug.WriteLine($"PUT v2/authorizations: {(int)response.StatusCode}");
+                if (response.IsSuccessStatusCode) return true;
 
-                return response.IsSuccessStatusCode;
+                // Log response body for debugging
+                string responseBody = await response.Content.ReadAsStringAsync();
+                System.Diagnostics.Debug.WriteLine($"Letzter Response Body: {responseBody}");
+
+                return false;
             }
             catch (Exception ex)
             {
