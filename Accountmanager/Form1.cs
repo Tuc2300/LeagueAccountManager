@@ -116,6 +116,53 @@ namespace Accountmanager
             }
         }
 
+        private async Task TestUpdateFlowAsync()
+        {
+            // DEBUG-only: fetches the latest release regardless of version, surfaces the
+            // update banner in the frontend, and runs the full download/install flow.
+            // Because Debugger.IsAttached is true, DownloadAndInstallUpdate will skip
+            // the actual file replace + Application.Exit and just leave the script + log
+            // in %TEMP% for inspection.
+            try
+            {
+                using (var client = new HttpClient())
+                {
+                    client.DefaultRequestHeaders.Add("User-Agent", "LeagueAccountManager");
+                    client.Timeout = TimeSpan.FromSeconds(15);
+
+                    string apiUrl = $"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/releases/latest";
+                    var response = await client.GetStringAsync(apiUrl);
+                    var release = JsonSerializer.Deserialize<GitHubRelease>(response);
+                    var asset = release?.Assets?.FirstOrDefault(a =>
+                        a.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase));
+
+                    if (asset == null)
+                    {
+                        SendToFrontend(new { type = "toast", message = "Debug-Test: Kein .zip Asset im Latest-Release gefunden.", level = "error" });
+                        return;
+                    }
+
+                    pendingUpdateVersion = (release.TagName?.TrimStart('v') ?? "debug") + "-DEBUG";
+                    pendingUpdateChangelog = release.Body ?? "";
+                    pendingUpdateDownloadUrl = asset.BrowserDownloadUrl;
+
+                    SendToFrontend(new
+                    {
+                        type = "updateAvailable",
+                        newVersion = pendingUpdateVersion,
+                        changelog = pendingUpdateChangelog,
+                        downloadUrl = pendingUpdateDownloadUrl
+                    });
+
+                    System.Diagnostics.Debug.WriteLine($"[Update][Test] Banner ausgelöst, Asset: {asset.BrowserDownloadUrl}");
+                }
+            }
+            catch (Exception ex)
+            {
+                SendToFrontend(new { type = "toast", message = $"Debug-Test fehlgeschlagen: {ex.Message}", level = "error" });
+            }
+        }
+
         private async Task DownloadAndInstallUpdate(string downloadUrl)
         {
             try
@@ -479,6 +526,24 @@ catch {
                         case "CANCEL_AUTO_LOGIN":
                             try { autoLoginCts?.Cancel(); } catch { }
                             responseData = new { success = true };
+                            break;
+
+                        case "IS_DEBUGGER_ATTACHED":
+                            responseData = new { attached = System.Diagnostics.Debugger.IsAttached };
+                            break;
+
+                        case "TEST_UPDATE":
+                            // Only allow when a debugger is attached so we never run this in release
+                            if (System.Diagnostics.Debugger.IsAttached)
+                            {
+                                _ = TestUpdateFlowAsync();
+                                responseData = new { success = true };
+                            }
+                            else
+                            {
+                                success = false;
+                                error = "Nur im Debug-Modus verfügbar.";
+                            }
                             break;
 
                         case "START_UPDATE":
