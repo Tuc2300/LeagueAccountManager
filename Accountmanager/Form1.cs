@@ -228,11 +228,12 @@ namespace Accountmanager
 
                 pendingUpdateScript = CreateUpdateScript(extractPath, tempPath);
 
-                SendToFrontend(new { type = "updateReady" });
+                bool isDebug = System.Diagnostics.Debugger.IsAttached;
+                SendToFrontend(new { type = "updateReady", debug = isDebug, scriptPath = pendingUpdateScript });
 
                 await Task.Delay(1500);
 
-                if (System.Diagnostics.Debugger.IsAttached)
+                if (isDebug)
                 {
                     // Don't actually replace files / exit while debugging — let the dev step through
                     SendToFrontend(new
