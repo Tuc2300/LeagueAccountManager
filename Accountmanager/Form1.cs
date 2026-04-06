@@ -539,9 +539,46 @@ namespace Accountmanager
                     return;
                 }
 
-                // Wait for the window to fully render (Riot Client uses Chromium, needs extra time)
+                // Poll for the login window to have actual input fields ready
                 SendToFrontend(new { type = "loginProgress", step = 2, totalSteps = 3, message = "Warte auf Login-Fenster...", status = "active" });
-                await Task.Delay(5000);
+
+                bool windowReady = false;
+                for (int i = 0; i < 30; i++)
+                {
+                    try
+                    {
+                        riotProcess.Refresh();
+                        var uxProcs = Process.GetProcessesByName("RiotClientUx");
+                        var uxWithWindow = uxProcs.FirstOrDefault(p => p.MainWindowHandle != IntPtr.Zero);
+                        if (uxWithWindow != null)
+                        {
+                            riotProcess = uxWithWindow;
+                            using (var automation = new UIA3Automation())
+                            {
+                                var win = automation.FromHandle(uxWithWindow.MainWindowHandle);
+                                if (win != null)
+                                {
+                                    var edits = win.FindAllDescendants().Where(e =>
+                                        e.ControlType == FlaUI.Core.Definitions.ControlType.Edit).ToArray();
+                                    if (edits.Length >= 1)
+                                    {
+                                        windowReady = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+
+                    await Task.Delay(1000);
+                }
+
+                if (!windowReady)
+                {
+                    // Give it one more second and continue anyway
+                    await Task.Delay(1000);
+                }
 
                 SendToFrontend(new { type = "loginProgress", step = 2, totalSteps = 3, message = "Login-Fenster bereit!", status = "done" });
 
@@ -670,6 +707,15 @@ namespace Accountmanager
                 var loginButton = allElements.FirstOrDefault(b =>
                     (b.ControlType == FlaUI.Core.Definitions.ControlType.Button ||
                      b.ControlType == FlaUI.Core.Definitions.ControlType.Hyperlink) &&
+                    !b.Name.ToLower().Contains("can't") &&
+                    !b.Name.ToLower().Contains("cant") &&
+                    !b.Name.ToLower().Contains("cannot") &&
+                    !b.Name.ToLower().Contains("kann nicht") &&
+                    !b.Name.ToLower().Contains("trouble") &&
+                    !b.Name.ToLower().Contains("forgot") &&
+                    !b.Name.ToLower().Contains("vergessen") &&
+                    !b.Name.ToLower().Contains("help") &&
+                    !b.Name.ToLower().Contains("hilfe") &&
                     (b.Name.ToLower().Contains("sign in") ||
                      b.Name.ToLower().Contains("anmelden") ||
                      b.Name.ToLower().Contains("log in") ||
