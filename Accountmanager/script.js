@@ -19,10 +19,11 @@ const toastMessage = document.getElementById('toastMessage');
 const toastIcon = document.getElementById('toastIcon');
 
 // WebView2 Kommunikation mit C#
+let _msgIdCounter = 0;
 function sendMessageToCSharp(action, data = null) {
     return new Promise((resolve, reject) => {
+        const messageId = (Date.now() * 1000) + (++_msgIdCounter);
         const message = { action, data };
-        const messageId = Date.now();
 
         window.chrome.webview.postMessage({ ...message, messageId });
 
@@ -316,11 +317,17 @@ function updateProgress(data) {
     text.textContent = data.message || '';
 }
 
-function updateReady() {
+function updateReady(data) {
     const btn = document.querySelector('.btn-update-install');
-    btn.innerHTML = '<i class="fas fa-check-circle"></i> App wird neu gestartet...';
     document.getElementById('updateProgressFill').style.width = '100%';
-    document.getElementById('updateProgressText').textContent = 'Installation wird vorbereitet...';
+    if (data && data.debug) {
+        btn.innerHTML = '<i class="fas fa-bug"></i> Debug: Skript bereit';
+        btn.disabled = true;
+        document.getElementById('updateProgressText').textContent = 'Debug-Modus: kein Restart';
+    } else {
+        btn.innerHTML = '<i class="fas fa-check-circle"></i> App wird neu gestartet...';
+        document.getElementById('updateProgressText').textContent = 'Installation wird vorbereitet...';
+    }
 }
 
 // Global message listener for push messages from C#
@@ -339,7 +346,7 @@ window.chrome.webview.addEventListener('message', (event) => {
             updateProgress(data);
             break;
         case 'updateReady':
-            updateReady();
+            updateReady(data);
             break;
         case 'toast':
             showToast(data.message, data.level || 'info');
