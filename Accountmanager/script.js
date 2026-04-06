@@ -214,7 +214,7 @@ async function autoLogin(id) {
 
 // Login Progress Modal
 function openLoginProgress() {
-    for (let i = 1; i <= 4; i++) {
+    for (let i = 1; i <= 3; i++) {
         const step = document.getElementById('loginStep' + i);
         step.setAttribute('data-status', 'waiting');
         step.querySelector('.step-icon').innerHTML = '<i class="fas fa-circle"></i>';

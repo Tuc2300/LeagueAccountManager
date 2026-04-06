@@ -26,7 +26,6 @@ namespace Accountmanager
         private string pendingUpdateChangelog = null;
         private string pendingUpdateDownloadUrl = null;
         private string pendingUpdateScript = null;
-        private DateTime loginStartTime;
 
         public Form1()
         {
@@ -473,13 +472,11 @@ namespace Accountmanager
 
                 if (string.IsNullOrEmpty(riotClientPath))
                 {
-                    SendToFrontend(new { type = "loginProgress", step = 0, totalSteps = 4, message = "Riot Client wurde nicht gefunden! Bitte stelle sicher, dass League of Legends installiert ist.", status = "error" });
+                    SendToFrontend(new { type = "loginProgress", step = 0, totalSteps = 3, message = "Riot Client wurde nicht gefunden! Bitte stelle sicher, dass League of Legends installiert ist.", status = "error" });
                     return;
                 }
 
-                SendToFrontend(new { type = "loginProgress", step = 1, totalSteps = 4, message = "Riot Client wird gestartet...", status = "active" });
-
-                loginStartTime = DateTime.UtcNow;
+                SendToFrontend(new { type = "loginProgress", step = 1, totalSteps = 3, message = "Riot Client wird gestartet...", status = "active" });
 
                 string workingDirectory = Path.GetDirectoryName(riotClientPath);
                 Process.Start(new ProcessStartInfo
@@ -494,7 +491,7 @@ namespace Accountmanager
             }
             catch (Exception ex)
             {
-                SendToFrontend(new { type = "loginProgress", step = 0, totalSteps = 4, message = $"Fehler beim Starten: {ex.Message}", status = "error" });
+                SendToFrontend(new { type = "loginProgress", step = 0, totalSteps = 3, message = $"Fehler beim Starten: {ex.Message}", status = "error" });
             }
         }
 
@@ -502,26 +499,34 @@ namespace Accountmanager
         {
             try
             {
-                // Step 1 already sent by StartLeagueAndLogin
-                SendToFrontend(new { type = "loginProgress", step = 1, totalSteps = 4, message = "Riot Client gestartet!", status = "done" });
+                SendToFrontend(new { type = "loginProgress", step = 1, totalSteps = 3, message = "Riot Client gestartet!", status = "done" });
 
-                // Step 2: Wait for process
-                SendToFrontend(new { type = "loginProgress", step = 2, totalSteps = 4, message = "Warte auf Riot Client Prozess...", status = "active" });
+                // Step 2: Wait for the Riot Client UI process (RiotClientUx)
+                SendToFrontend(new { type = "loginProgress", step = 2, totalSteps = 3, message = "Warte auf Login-Fenster...", status = "active" });
 
-                int maxWaitTime = 90000;
-                int waitedTime = 0;
                 Process riotProcess = null;
+                int maxWaitTime = 60000;
+                int waitedTime = 0;
 
+                // First wait for RiotClientUx specifically (the UI process with the login window)
                 while (waitedTime < maxWaitTime)
                 {
                     var processes = Process.GetProcessesByName("RiotClientUx");
-                    if (processes.Length == 0)
-                        processes = Process.GetProcessesByName("RiotClientServices");
-
                     if (processes.Length > 0)
                     {
                         riotProcess = processes[0];
                         break;
+                    }
+
+                    // Also check RiotClientServices as fallback
+                    if (waitedTime > 30000)
+                    {
+                        processes = Process.GetProcessesByName("RiotClientServices");
+                        if (processes.Length > 0)
+                        {
+                            riotProcess = processes[0];
+                            break;
+                        }
                     }
 
                     await Task.Delay(1000);
@@ -530,270 +535,67 @@ namespace Accountmanager
 
                 if (riotProcess == null)
                 {
-                    SendToFrontend(new { type = "loginProgress", step = 2, totalSteps = 4, message = "Riot Client Prozess konnte nicht gefunden werden.", status = "error" });
+                    SendToFrontend(new { type = "loginProgress", step = 2, totalSteps = 3, message = "Riot Client konnte nicht gefunden werden.", status = "error" });
                     return;
                 }
 
-                SendToFrontend(new { type = "loginProgress", step = 2, totalSteps = 4, message = "Riot Client gefunden!", status = "done" });
+                // Wait for the window to fully render (Riot Client uses Chromium, needs extra time)
+                SendToFrontend(new { type = "loginProgress", step = 2, totalSteps = 3, message = "Warte auf Login-Fenster...", status = "active" });
+                await Task.Delay(5000);
 
-                // Step 3: Try API login first, then fallback
-                SendToFrontend(new { type = "loginProgress", step = 3, totalSteps = 4, message = "Verbinde mit Riot Client API...", status = "active" });
+                SendToFrontend(new { type = "loginProgress", step = 2, totalSteps = 3, message = "Login-Fenster bereit!", status = "done" });
 
-                bool apiSuccess = await TryLoginViaRiotApi(username, password);
+                // Step 3: Enter credentials
+                SendToFrontend(new { type = "loginProgress", step = 3, totalSteps = 3, message = "Gebe Login-Daten ein...", status = "active" });
 
-                if (apiSuccess)
+                bool success = false;
+
+                // Try FlaUI automation first
+                try
                 {
-                    SendToFrontend(new { type = "loginProgress", step = 3, totalSteps = 4, message = "Login-Daten via API gesendet!", status = "done" });
+                    success = TryFlaUILogin(riotProcess, username, password);
                 }
-                else
+                catch (Exception ex)
                 {
-                    SendToFrontend(new { type = "loginProgress", step = 3, totalSteps = 4, message = "API nicht verf\u00fcgbar, verwende UI-Automation...", status = "active" });
-                    await Task.Delay(1000);
-
-                    try
-                    {
-                        PerformFallbackLogin(riotProcess, username, password);
-                        SendToFrontend(new { type = "loginProgress", step = 3, totalSteps = 4, message = "Login-Daten via UI-Automation gesendet!", status = "done" });
-                    }
-                    catch (Exception fallbackEx)
-                    {
-                        SendToFrontend(new { type = "loginProgress", step = 3, totalSteps = 4, message = $"Fallback fehlgeschlagen: {fallbackEx.Message}", status = "error" });
-                        return;
-                    }
+                    System.Diagnostics.Debug.WriteLine($"FlaUI fehlgeschlagen: {ex.Message}");
                 }
 
-                // Step 4: Done
-                SendToFrontend(new { type = "loginProgress", step = 4, totalSteps = 4, message = "Login-Daten wurden erfolgreich eingegeben!", status = "done" });
+                // Fallback to SendKeys if FlaUI didn't work
+                if (!success)
+                {
+                    SendToFrontend(new { type = "loginProgress", step = 3, totalSteps = 3, message = "Verwende Tastatureingabe...", status = "active" });
+                    await Task.Delay(500);
+                    UseSendKeysFallback(riotProcess, username, password);
+                }
+
+                SendToFrontend(new { type = "loginProgress", step = 3, totalSteps = 3, message = "Login-Daten wurden eingegeben!", status = "done" });
             }
             catch (Exception ex)
             {
-                SendToFrontend(new { type = "loginProgress", step = 0, totalSteps = 4, message = $"Fehler beim Auto-Login: {ex.Message}", status = "error" });
+                SendToFrontend(new { type = "loginProgress", step = 0, totalSteps = 3, message = $"Fehler beim Auto-Login: {ex.Message}", status = "error" });
             }
         }
 
-        private async Task<bool> TryLoginViaRiotApi(string username, string password)
+        private bool TryFlaUILogin(Process riotProcess, string username, string password)
         {
-            try
+            using (var automation = new UIA3Automation())
             {
-                string lockfilePath = FindRiotClientLockfile();
-                if (lockfilePath == null) return false;
+                AutomationElement window = null;
 
-                // Wait for a FRESH lockfile (written after we started the Riot Client)
-                // This avoids reading stale lockfiles from previous sessions with dead ports
-                string lockfileContent = null;
-                string port = null;
-                string token = null;
-
-                for (int attempt = 0; attempt < 30; attempt++)
+                // Try to find the window using the process handle first (more reliable)
+                try
                 {
-                    if (File.Exists(lockfilePath))
+                    if (riotProcess.MainWindowHandle != IntPtr.Zero)
                     {
-                        // Check if the lockfile was modified AFTER we started the client
-                        DateTime lockfileTime = File.GetLastWriteTimeUtc(lockfilePath);
-                        if (lockfileTime >= loginStartTime.AddSeconds(-5))
-                        {
-                            // Fresh lockfile - read it
-                            try
-                            {
-                                using (var fs = new FileStream(lockfilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
-                                using (var sr = new StreamReader(fs))
-                                {
-                                    lockfileContent = sr.ReadToEnd().Trim();
-                                }
-
-                                if (!string.IsNullOrEmpty(lockfileContent))
-                                {
-                                    // Parse: "Riot Client:pid:port:token:protocol"
-                                    string[] parts = lockfileContent.Split(':');
-                                    if (parts.Length >= 5)
-                                    {
-                                        port = parts[parts.Length - 3];
-                                        token = parts[parts.Length - 2];
-
-                                        // Validate PID matches a running Riot process
-                                        if (int.TryParse(parts[parts.Length - 4], out int lockfilePid))
-                                        {
-                                            try
-                                            {
-                                                var proc = Process.GetProcessById(lockfilePid);
-                                                if (proc != null && !proc.HasExited)
-                                                {
-                                                    System.Diagnostics.Debug.WriteLine($"Frische Lockfile: Port={port}, PID={lockfilePid}");
-                                                    break;
-                                                }
-                                            }
-                                            catch
-                                            {
-                                                // PID doesn't exist, lockfile is stale
-                                                port = null;
-                                                token = null;
-                                            }
-                                        }
-                                        else
-                                        {
-                                            // Can't parse PID, try anyway
-                                            System.Diagnostics.Debug.WriteLine($"Lockfile ohne PID-Validierung: Port={port}");
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                System.Diagnostics.Debug.WriteLine($"Lockfile lesen fehlgeschlagen: {ex.Message}");
-                            }
-                        }
-                        else
-                        {
-                            System.Diagnostics.Debug.WriteLine($"Lockfile ist veraltet (letzte Aenderung: {lockfileTime}, Start: {loginStartTime})");
-                        }
-                    }
-
-                    await Task.Delay(1000);
-                }
-
-                if (port == null || token == null)
-                {
-                    System.Diagnostics.Debug.WriteLine("Keine frische Lockfile gefunden");
-                    return false;
-                }
-
-                // Create HTTP client that ignores SSL errors (Riot uses self-signed cert)
-                var handler = new HttpClientHandler();
-                handler.ServerCertificateCustomValidationCallback = (msg, cert, chain, errors) => true;
-
-                using var client = new HttpClient(handler);
-                string authToken = Convert.ToBase64String(Encoding.ASCII.GetBytes($"riot:{token}"));
-                client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", authToken);
-                client.Timeout = TimeSpan.FromSeconds(10);
-
-                string baseUrl = $"https://127.0.0.1:{port}";
-
-                // Quick connectivity check (max 5 attempts, fail fast)
-                bool apiReady = false;
-                for (int i = 0; i < 5; i++)
-                {
-                    try
-                    {
-                        var check = await client.GetAsync($"{baseUrl}/riotclient/auth-token");
-                        apiReady = true;
-                        System.Diagnostics.Debug.WriteLine($"API erreichbar nach {i + 1} Versuchen (Status: {check.StatusCode})");
-                        break;
-                    }
-                    catch
-                    {
-                        await Task.Delay(2000);
+                        window = automation.FromHandle(riotProcess.MainWindowHandle);
                     }
                 }
+                catch { }
 
-                if (!apiReady)
+                // Fallback: search all desktop windows
+                if (window == null)
                 {
-                    System.Diagnostics.Debug.WriteLine("API nicht erreichbar");
-                    return false;
-                }
-
-                // Wait for login UI to load
-                await Task.Delay(2000);
-
-                // Try credentials endpoints
-                var credBody = new { username, password, persistLogin = false };
-
-                // Attempt 1: PUT /rso-auth/v1/session/credentials
-                var jsonContent = new StringContent(JsonSerializer.Serialize(credBody), Encoding.UTF8, "application/json");
-                var response = await client.PutAsync($"{baseUrl}/rso-auth/v1/session/credentials", jsonContent);
-                System.Diagnostics.Debug.WriteLine($"PUT v1/session/credentials: {(int)response.StatusCode}");
-                if (response.IsSuccessStatusCode) return true;
-
-                // Attempt 2: POST /rso-auth/v1/session/credentials
-                jsonContent = new StringContent(JsonSerializer.Serialize(credBody), Encoding.UTF8, "application/json");
-                response = await client.PostAsync($"{baseUrl}/rso-auth/v1/session/credentials", jsonContent);
-                System.Diagnostics.Debug.WriteLine($"POST v1/session/credentials: {(int)response.StatusCode}");
-                if (response.IsSuccessStatusCode) return true;
-
-                // Attempt 3: PUT /rso-auth/v2/authorizations
-                jsonContent = new StringContent(JsonSerializer.Serialize(credBody), Encoding.UTF8, "application/json");
-                response = await client.PutAsync($"{baseUrl}/rso-auth/v2/authorizations", jsonContent);
-                System.Diagnostics.Debug.WriteLine($"PUT v2/authorizations: {(int)response.StatusCode}");
-                if (response.IsSuccessStatusCode) return true;
-
-                // Log response body for debugging
-                string responseBody = await response.Content.ReadAsStringAsync();
-                System.Diagnostics.Debug.WriteLine($"Letzter Response Body: {responseBody}");
-
-                return false;
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"Riot API Login fehlgeschlagen: {ex.Message}");
-                return false;
-            }
-        }
-
-        private string FindRiotClientLockfile()
-        {
-            // Check multiple known locations for the Riot Client lockfile
-            var candidates = new List<string>();
-
-            // 1. AppData\Local location
-            string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            candidates.Add(Path.Combine(localAppData, "Riot Games", "Riot Client", "Config", "lockfile"));
-
-            // 2. Installation directory (relative to RiotClientServices.exe)
-            if (!string.IsNullOrEmpty(cachedRiotClientPath))
-            {
-                string riotClientDir = Path.GetDirectoryName(cachedRiotClientPath);
-                if (riotClientDir != null)
-                {
-                    // Same directory as EXE
-                    candidates.Add(Path.Combine(riotClientDir, "Config", "lockfile"));
-
-                    // One level up (Riot Games\Riot Client\Config\lockfile)
-                    string parentDir = Path.GetDirectoryName(riotClientDir);
-                    if (parentDir != null)
-                        candidates.Add(Path.Combine(parentDir, "Riot Client", "Config", "lockfile"));
-                }
-            }
-
-            // 3. Common installation paths on all drives
-            foreach (var drive in DriveInfo.GetDrives())
-            {
-                if (drive.IsReady && drive.DriveType == DriveType.Fixed)
-                {
-                    candidates.Add(Path.Combine(drive.Name, @"Riot Games\Riot Client\Config\lockfile"));
-                    candidates.Add(Path.Combine(drive.Name, @"Program Files\Riot Games\Riot Client\Config\lockfile"));
-                    candidates.Add(Path.Combine(drive.Name, @"Program Files (x86)\Riot Games\Riot Client\Config\lockfile"));
-                }
-            }
-
-            // 4. ProgramData location
-            string programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
-            candidates.Add(Path.Combine(programData, "Riot Games", "RiotClientInstalls.json"));
-
-            foreach (var path in candidates)
-            {
-                if (File.Exists(path))
-                {
-                    System.Diagnostics.Debug.WriteLine($"Lockfile gefunden: {path}");
-                    return path;
-                }
-            }
-
-            // Return most likely path (we'll wait for it to appear)
-            System.Diagnostics.Debug.WriteLine("Lockfile nicht vorhanden, warte auf Standardpfad...");
-            return candidates[0];
-        }
-
-        private void PerformFallbackLogin(Process riotProcess, string username, string password)
-        {
-            try
-            {
-                using (var automation = new UIA3Automation())
-                {
-                    AutomationElement window = null;
-                    int attempts = 0;
-                    int maxAttempts = 20;
-
-                    while (window == null && attempts < maxAttempts)
+                    for (int attempt = 0; attempt < 10; attempt++)
                     {
                         try
                         {
@@ -801,82 +603,96 @@ namespace Accountmanager
                             window = allWindows.FirstOrDefault(w =>
                                 w.Name.Contains("Riot Client") ||
                                 w.ClassName.Contains("Riot") ||
-                                w.Name.Contains("League of Legends") ||
-                                w.Name.Contains("Chrome"));
+                                w.Name.Contains("League of Legends"));
 
-                            if (window == null)
-                            {
-                                System.Threading.Thread.Sleep(2000);
-                                attempts++;
-                            }
+                            if (window != null) break;
                         }
-                        catch
-                        {
-                            System.Threading.Thread.Sleep(2000);
-                            attempts++;
-                        }
-                    }
+                        catch { }
 
-                    if (window == null)
-                    {
-                        UseSendKeysFallback(riotProcess, username, password);
-                        return;
-                    }
-
-                    System.Threading.Thread.Sleep(3000);
-
-                    var allElements = window.FindAllDescendants();
-                    var usernameField = allElements.FirstOrDefault(e =>
-                        e.AutomationId.ToLower().Contains("username") ||
-                        e.Name.ToLower().Contains("username") ||
-                        (e.ControlType == FlaUI.Core.Definitions.ControlType.Edit));
-
-                    if (usernameField != null)
-                    {
-                        try
-                        {
-                            usernameField.Focus();
-                            System.Threading.Thread.Sleep(500);
-                            usernameField.AsTextBox().Text = username;
-                            System.Threading.Thread.Sleep(1000);
-                        }
-                        catch
-                        {
-                            usernameField.Focus();
-                            System.Threading.Thread.Sleep(500);
-                            SendKeys.SendWait(username);
-                            System.Threading.Thread.Sleep(1000);
-                        }
-
-                        SendKeys.SendWait("{TAB}");
-                        System.Threading.Thread.Sleep(500);
-                        SendKeys.SendWait(password);
-                        System.Threading.Thread.Sleep(1000);
-
-                        var loginButton = allElements.FirstOrDefault(b =>
-                            b.Name.ToLower().Contains("sign in") ||
-                            b.Name.ToLower().Contains("anmelden") ||
-                            b.Name.ToLower().Contains("login"));
-
-                        if (loginButton != null)
-                        {
-                            try { loginButton.Click(); }
-                            catch { SendKeys.SendWait("{ENTER}"); }
-                        }
-                        else
-                        {
-                            SendKeys.SendWait("{ENTER}");
-                        }
-                    }
-                    else
-                    {
-                        UseSendKeysFallback(riotProcess, username, password);
+                        System.Threading.Thread.Sleep(2000);
                     }
                 }
-            }
-            catch
-            {
-                UseSendKeysFallback(riotProcess, username, password);
+
+                if (window == null) return false;
+
+                // Wait for the window content to be ready
+                System.Threading.Thread.Sleep(2000);
+
+                // Find all UI elements
+                var allElements = window.FindAllDescendants();
+                if (allElements == null || allElements.Length == 0) return false;
+
+                // Find the username/email input field
+                var usernameField = allElements.FirstOrDefault(e =>
+                    (e.ControlType == FlaUI.Core.Definitions.ControlType.Edit ||
+                     e.ControlType == FlaUI.Core.Definitions.ControlType.Document) &&
+                    (e.AutomationId.ToLower().Contains("username") ||
+                     e.AutomationId.ToLower().Contains("email") ||
+                     e.Name.ToLower().Contains("username") ||
+                     e.Name.ToLower().Contains("email") ||
+                     e.Name.ToLower().Contains("benutzername")));
+
+                // If specific field not found, try the first Edit control
+                if (usernameField == null)
+                {
+                    usernameField = allElements.FirstOrDefault(e =>
+                        e.ControlType == FlaUI.Core.Definitions.ControlType.Edit);
+                }
+
+                if (usernameField == null) return false;
+
+                // Focus and clear the username field
+                usernameField.Focus();
+                System.Threading.Thread.Sleep(300);
+
+                // Select all existing text and replace
+                SendKeys.SendWait("^(a)");
+                System.Threading.Thread.Sleep(100);
+
+                // Try direct text input first, fall back to SendKeys
+                try
+                {
+                    usernameField.AsTextBox().Text = username;
+                }
+                catch
+                {
+                    SendKeys.SendWait(username);
+                }
+                System.Threading.Thread.Sleep(500);
+
+                // Tab to password field and enter password
+                SendKeys.SendWait("{TAB}");
+                System.Threading.Thread.Sleep(300);
+                SendKeys.SendWait(password);
+                System.Threading.Thread.Sleep(500);
+
+                // Try to find and click the login/sign-in button
+                var loginButton = allElements.FirstOrDefault(b =>
+                    (b.ControlType == FlaUI.Core.Definitions.ControlType.Button ||
+                     b.ControlType == FlaUI.Core.Definitions.ControlType.Hyperlink) &&
+                    (b.Name.ToLower().Contains("sign in") ||
+                     b.Name.ToLower().Contains("anmelden") ||
+                     b.Name.ToLower().Contains("log in") ||
+                     b.Name.ToLower().Contains("login") ||
+                     b.Name.ToLower().Contains("einloggen")));
+
+                if (loginButton != null)
+                {
+                    try
+                    {
+                        loginButton.Click();
+                    }
+                    catch
+                    {
+                        SendKeys.SendWait("{ENTER}");
+                    }
+                }
+                else
+                {
+                    SendKeys.SendWait("{ENTER}");
+                }
+
+                return true;
             }
         }
 
@@ -884,21 +700,41 @@ namespace Accountmanager
         {
             try
             {
-                System.Threading.Thread.Sleep(2000);
-
+                // Bring the Riot Client window to front
                 IntPtr handle = riotProcess.MainWindowHandle;
                 if (handle != IntPtr.Zero)
                 {
                     SetForegroundWindow(handle);
                     System.Threading.Thread.Sleep(1000);
                 }
+                else
+                {
+                    // If no main window handle, try to find it via process name
+                    var uxProcesses = Process.GetProcessesByName("RiotClientUx");
+                    foreach (var proc in uxProcesses)
+                    {
+                        if (proc.MainWindowHandle != IntPtr.Zero)
+                        {
+                            SetForegroundWindow(proc.MainWindowHandle);
+                            System.Threading.Thread.Sleep(1000);
+                            break;
+                        }
+                    }
+                }
 
+                // Select all in case there's existing text, then type username
+                SendKeys.SendWait("^(a)");
+                System.Threading.Thread.Sleep(100);
                 SendKeys.SendWait(username);
-                System.Threading.Thread.Sleep(500);
+                System.Threading.Thread.Sleep(300);
+
+                // Tab to password and enter it
                 SendKeys.SendWait("{TAB}");
-                System.Threading.Thread.Sleep(500);
+                System.Threading.Thread.Sleep(300);
                 SendKeys.SendWait(password);
-                System.Threading.Thread.Sleep(500);
+                System.Threading.Thread.Sleep(300);
+
+                // Submit
                 SendKeys.SendWait("{ENTER}");
             }
             catch (Exception ex)
