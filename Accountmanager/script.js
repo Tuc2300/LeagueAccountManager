@@ -225,11 +225,17 @@ function openLoginProgress() {
     }
     document.getElementById('loginStatusMessage').textContent = '';
     document.getElementById('loginProgressClose').style.display = 'none';
+    document.getElementById('loginProgressCancel').style.display = '';
     document.getElementById('loginProgressModal').classList.add('show');
 }
 
 function closeLoginProgress() {
     document.getElementById('loginProgressModal').classList.remove('show');
+}
+
+function cancelLoginProgress() {
+    sendMessageToCSharp('CANCEL_AUTO_LOGIN').catch(() => {});
+    closeLoginProgress();
 }
 
 function updateLoginProgress(data) {
@@ -266,6 +272,7 @@ function updateLoginProgress(data) {
 
     if (status === 'done' || status === 'error') {
         document.getElementById('loginProgressClose').style.display = '';
+        document.getElementById('loginProgressCancel').style.display = 'none';
     }
 }
 
