@@ -10,10 +10,17 @@
 <body>
     <div class="container">
         <header>
-            <h1><i class="fas fa-user-shield"></i> Account Manager</h1>
-            <button id="addBtn" class="btn-add">
-                <i class="fas fa-plus"></i> Neuer Account
-            </button>
+            <div class="header-left">
+                <h1><i class="fas fa-user-shield"></i> Account Manager</h1>
+            </div>
+            <div class="header-actions">
+                <button id="settingsBtn" class="btn-icon" title="Einstellungen" onclick="openSettings()">
+                    <i class="fas fa-cog"></i>
+                </button>
+                <button id="addBtn" class="btn-add">
+                    <i class="fas fa-plus"></i> Neuer Account
+                </button>
+            </div>
         </header>
 
         <div class="search-box">
@@ -162,6 +169,47 @@
                 <div id="updateProgressFill" class="update-progress-fill" style="width:0%"></div>
             </div>
             <span id="updateProgressText" class="update-progress-text">Wird vorbereitet...</span>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="modal">
+        <div class="modal-content modal-medium">
+            <div class="modal-header">
+                <h2><i class="fas fa-cog"></i> Einstellungen</h2>
+                <button class="modal-close" onclick="closeSettings()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="settings-section">
+                    <h3>Akzentfarbe</h3>
+                    <div class="color-grid" id="colorGrid"></div>
+                </div>
+                <div class="settings-section">
+                    <h3>Hintergrund</h3>
+                    <div class="option-grid" id="bgGrid">
+                        <div class="option-card" data-bg="solid"><i class="fas fa-square"></i>Solid</div>
+                        <div class="option-card" data-bg="gradient"><i class="fas fa-circle-half-stroke"></i>Verlauf</div>
+                        <div class="option-card" data-bg="mesh"><i class="fas fa-shapes"></i>Mesh</div>
+                    </div>
+                </div>
+                <div class="settings-section">
+                    <h3>Dichte</h3>
+                    <div class="option-grid" id="densityGrid">
+                        <div class="option-card" data-density="comfortable"><i class="fas fa-arrows-up-down"></i>Komfortabel</div>
+                        <div class="option-card" data-density="compact"><i class="fas fa-compress"></i>Kompakt</div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-cancel" onclick="resetSettings()">
+                    <i class="fas fa-rotate-left"></i> Zurücksetzen
+                </button>
+                <button class="btn-save" onclick="closeSettings()">
+                    <i class="fas fa-check"></i> Fertig
+                </button>
+            </div>
         </div>
     </div>
 

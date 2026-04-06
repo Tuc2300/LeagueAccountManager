@@ -535,4 +535,95 @@ window.onclick = function (event) {
 }
 
 // Initial laden
+// === Settings / Personalization ===
+const ACCENT_PRESETS = [
+    { name: 'purple', color: '#a855f7', color2: '#8b5cf6' },
+    { name: 'blue',   color: '#3b82f6', color2: '#2563eb' },
+    { name: 'cyan',   color: '#06b6d4', color2: '#0891b2' },
+    { name: 'green',  color: '#10b981', color2: '#059669' },
+    { name: 'amber',  color: '#f59e0b', color2: '#d97706' },
+    { name: 'rose',   color: '#f43f5e', color2: '#e11d48' },
+    { name: 'pink',   color: '#ec4899', color2: '#db2777' },
+    { name: 'red',    color: '#ef4444', color2: '#dc2626' },
+    { name: 'indigo', color: '#6366f1', color2: '#4f46e5' },
+    { name: 'teal',   color: '#14b8a6', color2: '#0d9488' },
+    { name: 'lime',   color: '#84cc16', color2: '#65a30d' },
+    { name: 'orange', color: '#f97316', color2: '#ea580c' },
+];
+
+const DEFAULT_SETTINGS = { accent: 'purple', background: 'gradient', density: 'comfortable' };
+
+function loadSettings() {
+    try {
+        const stored = localStorage.getItem('lam_settings');
+        return stored ? { ...DEFAULT_SETTINGS, ...JSON.parse(stored) } : { ...DEFAULT_SETTINGS };
+    } catch {
+        return { ...DEFAULT_SETTINGS };
+    }
+}
+
+function saveSettings(s) {
+    localStorage.setItem('lam_settings', JSON.stringify(s));
+}
+
+function hexToRgb(hex) {
+    const m = hex.replace('#', '').match(/.{2}/g);
+    return m ? `${parseInt(m[0], 16)}, ${parseInt(m[1], 16)}, ${parseInt(m[2], 16)}` : '168, 85, 247';
+}
+
+function applySettings(s) {
+    const preset = ACCENT_PRESETS.find(p => p.name === s.accent) || ACCENT_PRESETS[0];
+    const root = document.documentElement;
+    const rgb = hexToRgb(preset.color);
+    root.style.setProperty('--accent', preset.color);
+    root.style.setProperty('--accent-2', preset.color2);
+    root.style.setProperty('--accent-soft', `rgba(${rgb}, 0.15)`);
+    root.style.setProperty('--accent-glow', `rgba(${rgb}, 0.35)`);
+    root.setAttribute('data-bg', s.background);
+    root.setAttribute('data-density', s.density);
+}
+
+function renderSettingsUI(s) {
+    const grid = document.getElementById('colorGrid');
+    grid.innerHTML = '';
+    ACCENT_PRESETS.forEach(p => {
+        const sw = document.createElement('div');
+        sw.className = 'color-swatch' + (s.accent === p.name ? ' active' : '');
+        sw.style.background = `linear-gradient(135deg, ${p.color}, ${p.color2})`;
+        sw.style.color = p.color;
+        sw.title = p.name;
+        sw.onclick = () => { s.accent = p.name; applySettings(s); saveSettings(s); renderSettingsUI(s); };
+        grid.appendChild(sw);
+    });
+    document.querySelectorAll('#bgGrid .option-card').forEach(c => {
+        c.classList.toggle('active', c.dataset.bg === s.background);
+        c.onclick = () => { s.background = c.dataset.bg; applySettings(s); saveSettings(s); renderSettingsUI(s); };
+    });
+    document.querySelectorAll('#densityGrid .option-card').forEach(c => {
+        c.classList.toggle('active', c.dataset.density === s.density);
+        c.onclick = () => { s.density = c.dataset.density; applySettings(s); saveSettings(s); renderSettingsUI(s); };
+    });
+}
+
+let _settings = loadSettings();
+applySettings(_settings);
+
+function openSettings() {
+    _settings = loadSettings();
+    renderSettingsUI(_settings);
+    document.getElementById('settingsModal').classList.add('show');
+}
+
+function closeSettings() {
+    document.getElementById('settingsModal').classList.remove('show');
+}
+
+function resetSettings() {
+    _settings = { ...DEFAULT_SETTINGS };
+    saveSettings(_settings);
+    applySettings(_settings);
+    renderSettingsUI(_settings);
+    showToast('Einstellungen zurückgesetzt', 'info');
+}
+
 loadAccounts();
