@@ -8,11 +8,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using FlaUI.Core;
-using FlaUI.Core.AutomationElements;
-using FlaUI.UIA3;
 using Microsoft.Web.WebView2.Core;
-using static FlaUI.Core.FrameworkAutomationElementBase;
 
 namespace Accountmanager
 {
@@ -542,17 +538,13 @@ namespace Accountmanager
                 // Wait for the login window handle to appear (Riot Client uses Chromium, so no UIA3 Edit controls)
                 SendToFrontend(new { type = "loginProgress", step = 2, totalSteps = 3, message = "Warte auf Login-Fenster...", status = "active" });
 
-                for (int i = 0; i < 60; i++)
+                IntPtr loginWindowHandle = IntPtr.Zero;
+                for (int i = 0; i < 120; i++)
                 {
                     try
                     {
-                        var uxProcs = Process.GetProcessesByName("RiotClientUx");
-                        var uxWithWindow = uxProcs.FirstOrDefault(p => p.MainWindowHandle != IntPtr.Zero);
-                        if (uxWithWindow != null)
-                        {
-                            riotProcess = uxWithWindow;
-                            break;
-                        }
+                        loginWindowHandle = FindRiotClientWindow();
+                        if (loginWindowHandle != IntPtr.Zero) break;
                     }
                     catch { }
 
@@ -560,32 +552,15 @@ namespace Accountmanager
                 }
 
                 // Wait for the login page to finish rendering inside the Chromium window
-                await Task.Delay(3000);
+                await Task.Delay(2500);
 
                 SendToFrontend(new { type = "loginProgress", step = 2, totalSteps = 3, message = "Login-Fenster bereit!", status = "done" });
 
                 // Step 3: Enter credentials
                 SendToFrontend(new { type = "loginProgress", step = 3, totalSteps = 3, message = "Gebe Login-Daten ein...", status = "active" });
 
-                bool success = false;
-
-                // Try FlaUI automation first
-                try
-                {
-                    success = TryFlaUILogin(riotProcess, username, password);
-                }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Debug.WriteLine($"FlaUI fehlgeschlagen: {ex.Message}");
-                }
-
-                // Fallback to SendKeys if FlaUI didn't work
-                if (!success)
-                {
-                    SendToFrontend(new { type = "loginProgress", step = 3, totalSteps = 3, message = "Verwende Tastatureingabe...", status = "active" });
-                    await Task.Delay(500);
-                    UseSendKeysFallback(riotProcess, username, password);
-                }
+                // Riot Client is Chromium-based, so use SendKeys directly on the window handle we found
+                UseSendKeysFallback(loginWindowHandle, username, password);
 
                 SendToFrontend(new { type = "loginProgress", step = 3, totalSteps = 3, message = "Login-Daten wurden eingegeben!", status = "done" });
             }
@@ -595,149 +570,18 @@ namespace Accountmanager
             }
         }
 
-        private bool TryFlaUILogin(Process riotProcess, string username, string password)
-        {
-            using (var automation = new UIA3Automation())
-            {
-                AutomationElement window = null;
-
-                // Try to find the window using the process handle first (more reliable)
-                try
-                {
-                    if (riotProcess.MainWindowHandle != IntPtr.Zero)
-                    {
-                        window = automation.FromHandle(riotProcess.MainWindowHandle);
-                    }
-                }
-                catch { }
-
-                // Fallback: search all desktop windows
-                if (window == null)
-                {
-                    try
-                    {
-                        var allWindows = automation.GetDesktop().FindAllChildren();
-                        window = allWindows.FirstOrDefault(w =>
-                            w.Name.Contains("Riot Client") ||
-                            w.ClassName.Contains("Riot") ||
-                            w.Name.Contains("League of Legends"));
-                    }
-                    catch { }
-                }
-
-                if (window == null) return false;
-
-                // Find all UI elements
-                var allElements = window.FindAllDescendants();
-                if (allElements == null || allElements.Length == 0) return false;
-
-                // Find the username/email input field
-                var usernameField = allElements.FirstOrDefault(e =>
-                    (e.ControlType == FlaUI.Core.Definitions.ControlType.Edit ||
-                     e.ControlType == FlaUI.Core.Definitions.ControlType.Document) &&
-                    (e.AutomationId.ToLower().Contains("username") ||
-                     e.AutomationId.ToLower().Contains("email") ||
-                     e.Name.ToLower().Contains("username") ||
-                     e.Name.ToLower().Contains("email") ||
-                     e.Name.ToLower().Contains("benutzername")));
-
-                // If specific field not found, try the first Edit control
-                if (usernameField == null)
-                {
-                    usernameField = allElements.FirstOrDefault(e =>
-                        e.ControlType == FlaUI.Core.Definitions.ControlType.Edit);
-                }
-
-                if (usernameField == null) return false;
-
-                // Focus and clear the username field
-                usernameField.Focus();
-                System.Threading.Thread.Sleep(300);
-
-                // Select all existing text and replace
-                SendKeys.SendWait("^(a)");
-                System.Threading.Thread.Sleep(100);
-
-                // Try direct text input first, fall back to SendKeys
-                try
-                {
-                    usernameField.AsTextBox().Text = username;
-                }
-                catch
-                {
-                    SendKeys.SendWait(username);
-                }
-                System.Threading.Thread.Sleep(500);
-
-                // Tab to password field and enter password
-                SendKeys.SendWait("{TAB}");
-                System.Threading.Thread.Sleep(300);
-                SendKeys.SendWait(password);
-                System.Threading.Thread.Sleep(500);
-
-                // Try to find and click the login/sign-in button
-                var loginButton = allElements.FirstOrDefault(b =>
-                    (b.ControlType == FlaUI.Core.Definitions.ControlType.Button ||
-                     b.ControlType == FlaUI.Core.Definitions.ControlType.Hyperlink) &&
-                    !b.Name.ToLower().Contains("can't") &&
-                    !b.Name.ToLower().Contains("cant") &&
-                    !b.Name.ToLower().Contains("cannot") &&
-                    !b.Name.ToLower().Contains("kann nicht") &&
-                    !b.Name.ToLower().Contains("trouble") &&
-                    !b.Name.ToLower().Contains("forgot") &&
-                    !b.Name.ToLower().Contains("vergessen") &&
-                    !b.Name.ToLower().Contains("help") &&
-                    !b.Name.ToLower().Contains("hilfe") &&
-                    (b.Name.ToLower().Contains("sign in") ||
-                     b.Name.ToLower().Contains("anmelden") ||
-                     b.Name.ToLower().Contains("log in") ||
-                     b.Name.ToLower().Contains("login") ||
-                     b.Name.ToLower().Contains("einloggen")));
-
-                if (loginButton != null)
-                {
-                    try
-                    {
-                        loginButton.Click();
-                    }
-                    catch
-                    {
-                        SendKeys.SendWait("{ENTER}");
-                    }
-                }
-                else
-                {
-                    SendKeys.SendWait("{ENTER}");
-                }
-
-                return true;
-            }
-        }
-
-        private void UseSendKeysFallback(Process riotProcess, string username, string password)
+        private void UseSendKeysFallback(IntPtr windowHandle, string username, string password)
         {
             try
             {
-                // Bring the Riot Client window to front
-                IntPtr handle = riotProcess.MainWindowHandle;
-                if (handle != IntPtr.Zero)
+                if (windowHandle == IntPtr.Zero)
                 {
-                    SetForegroundWindow(handle);
-                    System.Threading.Thread.Sleep(300);
+                    windowHandle = FindRiotClientWindow();
                 }
-                else
+                if (windowHandle != IntPtr.Zero)
                 {
-                    // If no main window handle, try to find it via process name
-                    var uxProcesses = Process.GetProcessesByName("RiotClientUx");
-                    foreach (var proc in uxProcesses)
-                    {
-                        if (proc.MainWindowHandle != IntPtr.Zero)
-                        {
-                            SetForegroundWindow(proc.MainWindowHandle);
-                            System.Threading.Thread.Sleep(300);
-                            break;
-                        }
-                    }
+                    SetForegroundWindow(windowHandle);
+                    System.Threading.Thread.Sleep(400);
                 }
 
                 // Select all in case there's existing text, then type username
@@ -763,6 +607,55 @@ namespace Accountmanager
 
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+        private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Auto)]
+        private static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder lpString, int nMaxCount);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern int GetWindowTextLength(IntPtr hWnd);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool IsWindowVisible(IntPtr hWnd);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+        private static IntPtr FindRiotClientWindow()
+        {
+            IntPtr found = IntPtr.Zero;
+            var uxPids = new System.Collections.Generic.HashSet<uint>(
+                Process.GetProcessesByName("RiotClientUx").Select(p => (uint)p.Id));
+
+            EnumWindows((hWnd, lParam) =>
+            {
+                if (!IsWindowVisible(hWnd)) return true;
+                int len = GetWindowTextLength(hWnd);
+                if (len == 0) return true;
+                var sb = new System.Text.StringBuilder(len + 1);
+                GetWindowText(hWnd, sb, sb.Capacity);
+                string title = sb.ToString();
+                if (title.IndexOf("Riot Client", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    found = hWnd;
+                    return false;
+                }
+                // Also match by owning RiotClientUx process
+                GetWindowThreadProcessId(hWnd, out uint pid);
+                if (uxPids.Contains(pid) && !string.IsNullOrWhiteSpace(title))
+                {
+                    found = hWnd;
+                    return false;
+                }
+                return true;
+            }, IntPtr.Zero);
+
+            return found;
+        }
 
 
         private string cachedRiotClientPath = null;
