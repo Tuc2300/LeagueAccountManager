@@ -633,4 +633,17 @@ function resetSettings() {
     showToast('Einstellungen zurückgesetzt', 'info');
 }
 
+// Show debug-only update test button if a debugger is attached
+sendMessageToCSharp('IS_DEBUGGER_ATTACHED').then(res => {
+    if (res && res.attached) {
+        document.getElementById('debugUpdateBtn').style.display = '';
+    }
+}).catch(() => {});
+
+function testUpdate() {
+    sendMessageToCSharp('TEST_UPDATE')
+        .then(() => showToast('Update-Test gestartet (siehe Banner)', 'info'))
+        .catch(err => showToast('Test fehlgeschlagen: ' + err.message, 'error'));
+}
+
 loadAccounts();
