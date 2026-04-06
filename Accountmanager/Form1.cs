@@ -539,46 +539,28 @@ namespace Accountmanager
                     return;
                 }
 
-                // Poll for the login window to have actual input fields ready
+                // Wait for the login window handle to appear (Riot Client uses Chromium, so no UIA3 Edit controls)
                 SendToFrontend(new { type = "loginProgress", step = 2, totalSteps = 3, message = "Warte auf Login-Fenster...", status = "active" });
 
-                bool windowReady = false;
-                for (int i = 0; i < 30; i++)
+                for (int i = 0; i < 60; i++)
                 {
                     try
                     {
-                        riotProcess.Refresh();
                         var uxProcs = Process.GetProcessesByName("RiotClientUx");
                         var uxWithWindow = uxProcs.FirstOrDefault(p => p.MainWindowHandle != IntPtr.Zero);
                         if (uxWithWindow != null)
                         {
                             riotProcess = uxWithWindow;
-                            using (var automation = new UIA3Automation())
-                            {
-                                var win = automation.FromHandle(uxWithWindow.MainWindowHandle);
-                                if (win != null)
-                                {
-                                    var edits = win.FindAllDescendants().Where(e =>
-                                        e.ControlType == FlaUI.Core.Definitions.ControlType.Edit).ToArray();
-                                    if (edits.Length >= 1)
-                                    {
-                                        windowReady = true;
-                                        break;
-                                    }
-                                }
-                            }
+                            break;
                         }
                     }
                     catch { }
 
-                    await Task.Delay(1000);
+                    await Task.Delay(500);
                 }
 
-                if (!windowReady)
-                {
-                    // Give it one more second and continue anyway
-                    await Task.Delay(1000);
-                }
+                // Wait for the login page to finish rendering inside the Chromium window
+                await Task.Delay(3000);
 
                 SendToFrontend(new { type = "loginProgress", step = 2, totalSteps = 3, message = "Login-Fenster bereit!", status = "done" });
 
@@ -632,28 +614,18 @@ namespace Accountmanager
                 // Fallback: search all desktop windows
                 if (window == null)
                 {
-                    for (int attempt = 0; attempt < 10; attempt++)
+                    try
                     {
-                        try
-                        {
-                            var allWindows = automation.GetDesktop().FindAllChildren();
-                            window = allWindows.FirstOrDefault(w =>
-                                w.Name.Contains("Riot Client") ||
-                                w.ClassName.Contains("Riot") ||
-                                w.Name.Contains("League of Legends"));
-
-                            if (window != null) break;
-                        }
-                        catch { }
-
-                        System.Threading.Thread.Sleep(2000);
+                        var allWindows = automation.GetDesktop().FindAllChildren();
+                        window = allWindows.FirstOrDefault(w =>
+                            w.Name.Contains("Riot Client") ||
+                            w.ClassName.Contains("Riot") ||
+                            w.Name.Contains("League of Legends"));
                     }
+                    catch { }
                 }
 
                 if (window == null) return false;
-
-                // Wait for the window content to be ready
-                System.Threading.Thread.Sleep(2000);
 
                 // Find all UI elements
                 var allElements = window.FindAllDescendants();
@@ -751,7 +723,7 @@ namespace Accountmanager
                 if (handle != IntPtr.Zero)
                 {
                     SetForegroundWindow(handle);
-                    System.Threading.Thread.Sleep(1000);
+                    System.Threading.Thread.Sleep(300);
                 }
                 else
                 {
@@ -762,7 +734,7 @@ namespace Accountmanager
                         if (proc.MainWindowHandle != IntPtr.Zero)
                         {
                             SetForegroundWindow(proc.MainWindowHandle);
-                            System.Threading.Thread.Sleep(1000);
+                            System.Threading.Thread.Sleep(300);
                             break;
                         }
                     }
