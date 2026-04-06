@@ -624,7 +624,7 @@ catch {
 
                 ct.ThrowIfCancellationRequested();
                 // Brief delay so the Chromium login form is interactive
-                await Task.Delay(1200, ct);
+                await Task.Delay(3200, ct);
 
                 ct.ThrowIfCancellationRequested();
 
