@@ -507,7 +507,7 @@ namespace Accountmanager
                 // First wait for RiotClientUx specifically (the UI process with the login window)
                 while (waitedTime < maxWaitTime)
                 {
-                    var processes = Process.GetProcessesByName("RiotClientUx");
+                    var processes = GetRiotClientProcesses();
                     if (processes.Length > 0)
                     {
                         riotProcess = processes[0];
@@ -625,11 +625,21 @@ namespace Accountmanager
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 
+        private static Process[] GetRiotClientProcesses()
+        {
+            // The actual UI process is named "Riot Client" (with space), not "RiotClientUx"
+            var list = new System.Collections.Generic.List<Process>();
+            list.AddRange(Process.GetProcessesByName("Riot Client"));
+            list.AddRange(Process.GetProcessesByName("RiotClientUx"));
+            list.AddRange(Process.GetProcessesByName("RiotClientUxRender"));
+            return list.ToArray();
+        }
+
         private static IntPtr FindRiotClientWindow()
         {
             IntPtr found = IntPtr.Zero;
             var uxPids = new System.Collections.Generic.HashSet<uint>(
-                Process.GetProcessesByName("RiotClientUx").Select(p => (uint)p.Id));
+                GetRiotClientProcesses().Select(p => (uint)p.Id));
 
             EnumWindows((hWnd, lParam) =>
             {
