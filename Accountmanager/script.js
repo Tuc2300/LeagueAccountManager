@@ -147,9 +147,13 @@ function renderAccounts(accountsToRender = accounts) {
                     <i class="fas fa-chart-line"></i>
                     <span class="btn-text">OP.GG</span>
                 </button>
-                <button class="btn-action btn-copy-username" onclick="copyUsername(${account.id})" title="Username kopieren">
-                    <i class="fas fa-user-circle"></i>
-                    <span class="btn-text">Username</span>
+                <button class="btn-action btn-copy-username" onclick="copyUsernameOnly(${account.id})" title="Nur Name kopieren">
+                    <i class="fas fa-user"></i>
+                    <span class="btn-text">Name</span>
+                </button>
+                <button class="btn-action btn-copy-username" onclick="copyUsername(${account.id})" title="Name + Tag kopieren">
+                    <i class="fas fa-user-tag"></i>
+                    <span class="btn-text">Name + Tag</span>
                 </button>
                 <button class="btn-action btn-copy" onclick="copyPassword(${account.id})" title="Passwort kopieren">
                     <i class="fas fa-copy"></i>
@@ -463,7 +467,16 @@ function copyUsername(id) {
     const account = accounts.find(acc => acc.id === id);
     const usernameWithTag = `${account.username}#${account.tag}`;
     navigator.clipboard.writeText(usernameWithTag).then(() => {
-        showToast('Username + Tag in Zwischenablage kopiert!', 'info');
+        showToast('Name + Tag in Zwischenablage kopiert!', 'info');
+    }).catch(() => {
+        showToast('Fehler beim Kopieren!', 'error');
+    });
+}
+
+function copyUsernameOnly(id) {
+    const account = accounts.find(acc => acc.id === id);
+    navigator.clipboard.writeText(account.username).then(() => {
+        showToast('Name in Zwischenablage kopiert!', 'info');
     }).catch(() => {
         showToast('Fehler beim Kopieren!', 'error');
     });
