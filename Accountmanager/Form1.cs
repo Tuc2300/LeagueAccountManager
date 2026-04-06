@@ -122,6 +122,8 @@ namespace Accountmanager
             {
                 string newVersion = pendingUpdateVersion ?? "update";
                 string tempPath = Path.Combine(Path.GetTempPath(), "LeagueAccountManager_Update");
+                // Clean leftover from previous runs so we never restore stale files
+                try { if (Directory.Exists(tempPath)) Directory.Delete(tempPath, true); } catch { }
                 Directory.CreateDirectory(tempPath);
 
                 string zipFile = Path.Combine(tempPath, $"LeagueAccountManager_{newVersion}.zip");
@@ -181,13 +183,30 @@ namespace Accountmanager
 
                 SendToFrontend(new { type = "updateReady" });
 
-                await Task.Delay(2000);
+                await Task.Delay(1500);
 
+                if (System.Diagnostics.Debugger.IsAttached)
+                {
+                    // Don't actually replace files / exit while debugging — let the dev step through
+                    SendToFrontend(new
+                    {
+                        type = "toast",
+                        message = $"Debug-Modus: Update-Skript wurde NICHT ausgeführt.\nPfad: {pendingUpdateScript}\nLog: {Path.Combine(tempPath, "update.log")}",
+                        level = "info"
+                    });
+                    System.Diagnostics.Debug.WriteLine($"[Update] Skript bereit unter: {pendingUpdateScript}");
+                    System.Diagnostics.Debug.WriteLine($"[Update] Extracted: {extractPath}");
+                    System.Diagnostics.Debug.WriteLine($"[Update] Log wird sein: {Path.Combine(tempPath, "update.log")}");
+                    return;
+                }
+
+                int currentPid = System.Diagnostics.Process.GetCurrentProcess().Id;
                 Process.Start(new ProcessStartInfo
                 {
-                    FileName = pendingUpdateScript,
-                    UseShellExecute = true,
-                    CreateNoWindow = false,
+                    FileName = "powershell.exe",
+                    Arguments = $"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"{pendingUpdateScript}\" -ParentPid {currentPid}",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
                     WorkingDirectory = Path.GetDirectoryName(pendingUpdateScript)
                 });
 
@@ -218,59 +237,101 @@ namespace Accountmanager
         {
             string currentExePath = System.Windows.Forms.Application.ExecutablePath;
             string currentDirectory = Path.GetDirectoryName(currentExePath);
-            string scriptPath = Path.Combine(tempPath, "update.bat");
-            string backupPath = Path.Combine(currentDirectory, "backup_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+            string scriptPath = Path.Combine(tempPath, "update.ps1");
+            string logPath = Path.Combine(tempPath, "update.log");
+            string backupPath = Path.Combine(tempPath, "backup");
 
-            string script = $@"@echo off
-                chcp 65001 >nul
-                title League Account Manager - Update Installation
-                color 0A
+            // PowerShell script: waits on parent PID, backs up to TEMP (not the install dir),
+            // copies new files via Copy-Item, restores backup on failure, logs everything,
+            // then relaunches the app and self-deletes.
+            string script = @"param(
+    [int]$ParentPid
+)
 
-                echo.
-                echo ╔════════════════════════════════════════════════════════╗
-                echo ║   League Account Manager - Update Installation        ║
-                echo ╚════════════════════════════════════════════════════════╝
-                echo.
+$ErrorActionPreference = 'Stop'
+$LogPath       = '" + logPath.Replace("'", "''") + @"'
+$InstallDir    = '" + currentDirectory.Replace("'", "''") + @"'
+$ExtractDir    = '" + extractPath.Replace("'", "''") + @"'
+$BackupDir     = '" + backupPath.Replace("'", "''") + @"'
+$AppExe        = '" + currentExePath.Replace("'", "''") + @"'
+$TempRoot      = '" + tempPath.Replace("'", "''") + @"'
 
-                echo [1/5] Warte auf Anwendungsende...
-                timeout /t 3 /nobreak >nul
+function Write-Log {
+    param([string]$Message, [string]$Level = 'INFO')
+    $line = ('{0} [{1}] {2}' -f (Get-Date -Format 'HH:mm:ss.fff'), $Level, $Message)
+    Add-Content -LiteralPath $LogPath -Value $line -Encoding UTF8
+}
 
-                echo [2/5] Erstelle Backup...
-                if not exist ""{backupPath}"" mkdir ""{backupPath}""
-                xcopy ""{currentDirectory}\*.*"" ""{backupPath}\"" /E /Y /I /Q >nul 2>&1
-                echo ✓ Backup erstellt in: backup_{DateTime.Now.ToString("yyyyMMdd_HHmmss")}
+try {
+    Write-Log ""Updater gestartet (ParentPid=$ParentPid)""
+    Write-Log ""InstallDir: $InstallDir""
+    Write-Log ""ExtractDir: $ExtractDir""
 
-                echo [3/5] Installiere neue Version...
-                xcopy ""{extractPath}\*.*"" ""{currentDirectory}\"" /E /Y /I /Q
-                if errorlevel 1 (
-                    echo ✗ Fehler bei der Installation!
-                    echo Backup wird wiederhergestellt...
-                    xcopy ""{backupPath}\*.*"" ""{currentDirectory}\"" /E /Y /I /Q >nul 2>&1
-                    pause
-                    exit /b 1
-                )
-                echo ✓ Dateien aktualisiert
+    # 1. Auf Beendigung der App warten
+    if ($ParentPid -gt 0) {
+        try {
+            $proc = Get-Process -Id $ParentPid -ErrorAction SilentlyContinue
+            if ($proc) {
+                Write-Log ""Warte auf Prozess $ParentPid ($($proc.ProcessName))...""
+                $proc.WaitForExit(15000) | Out-Null
+            }
+        } catch { Write-Log ""WaitForExit Fehler: $_"" 'WARN' }
+    }
+    Start-Sleep -Milliseconds 500
 
-                echo [4/5] Räume temporäre Dateien auf...
-                rd /s /q ""{tempPath}"" >nul 2>&1
-                echo ✓ Bereinigung abgeschlossen
+    # 2. Backup nach %TEMP% (nicht in den Install-Ordner!)
+    Write-Log 'Erstelle Backup...'
+    if (Test-Path -LiteralPath $BackupDir) { Remove-Item -LiteralPath $BackupDir -Recurse -Force }
+    New-Item -ItemType Directory -Path $BackupDir -Force | Out-Null
+    Get-ChildItem -LiteralPath $InstallDir -Force | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination $BackupDir -Recurse -Force
+    }
+    Write-Log ""Backup OK -> $BackupDir""
 
-                echo [5/5] Starte Anwendung neu...
-                timeout /t 2 /nobreak >nul
-                start """" ""{currentExePath}""
+    # 3. Neue Dateien rüberkopieren
+    Write-Log 'Kopiere neue Dateien...'
+    Get-ChildItem -LiteralPath $ExtractDir -Force | ForEach-Object {
+        $dest = Join-Path $InstallDir $_.Name
+        if (Test-Path -LiteralPath $dest) {
+            Remove-Item -LiteralPath $dest -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        Copy-Item -LiteralPath $_.FullName -Destination $InstallDir -Recurse -Force
+    }
+    Write-Log 'Kopieren OK'
 
-                echo.
-                echo ╔════════════════════════════════════════════════════════╗
-                echo ║           Update erfolgreich installiert! ✓           ║
-                echo ╚════════════════════════════════════════════════════════╝
-                echo.
-                echo Drücke eine beliebige Taste zum Beenden...
-                pause >nul
+    # 4. Verifizieren dass die App noch existiert
+    if (-not (Test-Path -LiteralPath $AppExe)) {
+        throw ""Neue Exe nicht gefunden: $AppExe""
+    }
 
-                exit
-            ";
+    # 5. App neu starten
+    Write-Log 'Starte App neu...'
+    Start-Process -FilePath $AppExe -WorkingDirectory $InstallDir
 
-            File.WriteAllText(scriptPath, script, Encoding.UTF8);
+    Write-Log 'Update abgeschlossen. Temp-Ordner verbleibt für Diagnose.'
+}
+catch {
+    Write-Log ""FEHLER: $_"" 'ERROR'
+    Write-Log 'Versuche Backup wiederherzustellen...' 'WARN'
+    try {
+        if (Test-Path -LiteralPath $BackupDir) {
+            Get-ChildItem -LiteralPath $BackupDir -Force | ForEach-Object {
+                Copy-Item -LiteralPath $_.FullName -Destination $InstallDir -Recurse -Force
+            }
+            Write-Log 'Backup wiederhergestellt.' 'WARN'
+        }
+    } catch {
+        Write-Log ""Restore fehlgeschlagen: $_"" 'ERROR'
+    }
+    # App trotzdem versuchen zu starten
+    if (Test-Path -LiteralPath $AppExe) {
+        Start-Process -FilePath $AppExe -WorkingDirectory $InstallDir
+    }
+    exit 1
+}
+";
+
+            File.WriteAllText(scriptPath, script, new UTF8Encoding(false));
             return scriptPath;
         }
 
