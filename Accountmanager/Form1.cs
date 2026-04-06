@@ -539,7 +539,7 @@ namespace Accountmanager
                 SendToFrontend(new { type = "loginProgress", step = 2, totalSteps = 3, message = "Warte auf Login-Fenster...", status = "active" });
 
                 IntPtr loginWindowHandle = IntPtr.Zero;
-                for (int i = 0; i < 120; i++)
+                for (int i = 0; i < 300; i++)
                 {
                     try
                     {
@@ -548,11 +548,11 @@ namespace Accountmanager
                     }
                     catch { }
 
-                    await Task.Delay(500);
+                    await Task.Delay(200);
                 }
 
-                // Wait for the login page to finish rendering inside the Chromium window
-                await Task.Delay(2500);
+                // Brief delay so the Chromium login form is interactive
+                await Task.Delay(1200);
 
                 SendToFrontend(new { type = "loginProgress", step = 2, totalSteps = 3, message = "Login-Fenster bereit!", status = "done" });
 
