@@ -14,7 +14,7 @@ namespace Accountmanager
 {
     public partial class Form1 : Form
     {
-        private const string CURRENT_VERSION = "1.3";
+        private const string CURRENT_VERSION = "1.3.1";
         private const string GITHUB_REPO_OWNER = "Tuc2300";
         private const string GITHUB_REPO_NAME = "LeagueAccountManager";
         private List<Account> accounts = new List<Account>();
