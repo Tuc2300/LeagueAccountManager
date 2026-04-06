@@ -105,23 +105,21 @@ h1 {
     font-size: 24px;
     font-weight: 700;
     letter-spacing: -0.02em;
-    display: flex;
-    align-items: center;
-    gap: 12px;
+    line-height: 1;
 }
 
-    h1 i {
-        color: var(--accent);
-        background: var(--accent-soft);
-        width: 42px;
-        height: 42px;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        border-radius: 12px;
-        font-size: 18px;
-        flex-shrink: 0;
-    }
+.header-icon {
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 12px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: 20px;
+    flex-shrink: 0;
+}
 
 .btn-add {
     background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);

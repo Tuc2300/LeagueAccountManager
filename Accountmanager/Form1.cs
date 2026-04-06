@@ -22,6 +22,7 @@ namespace Accountmanager
         private string pendingUpdateChangelog = null;
         private string pendingUpdateDownloadUrl = null;
         private string pendingUpdateScript = null;
+        private System.Threading.CancellationTokenSource autoLoginCts = null;
 
         public Form1()
         {
@@ -414,6 +415,11 @@ namespace Accountmanager
                             }
                             break;
 
+                        case "CANCEL_AUTO_LOGIN":
+                            try { autoLoginCts?.Cancel(); } catch { }
+                            responseData = new { success = true };
+                            break;
+
                         case "START_UPDATE":
                             if (root.TryGetProperty("data", out var updateRequestData))
                             {
@@ -483,7 +489,10 @@ namespace Accountmanager
                     WorkingDirectory = workingDirectory
                 });
 
-                Task.Run(async () => await PerformAutoLogin(username, password));
+                try { autoLoginCts?.Cancel(); autoLoginCts?.Dispose(); } catch { }
+                autoLoginCts = new System.Threading.CancellationTokenSource();
+                var ct = autoLoginCts.Token;
+                Task.Run(async () => await PerformAutoLogin(username, password, ct));
             }
             catch (Exception ex)
             {
@@ -491,10 +500,11 @@ namespace Accountmanager
             }
         }
 
-        private async Task PerformAutoLogin(string username, string password)
+        private async Task PerformAutoLogin(string username, string password, System.Threading.CancellationToken ct)
         {
             try
             {
+                ct.ThrowIfCancellationRequested();
                 SendToFrontend(new { type = "loginProgress", step = 1, totalSteps = 3, message = "Riot Client gestartet!", status = "done" });
 
                 // Step 2: Wait for the Riot Client UI process (RiotClientUx)
@@ -525,7 +535,7 @@ namespace Accountmanager
                         }
                     }
 
-                    await Task.Delay(1000);
+                    await Task.Delay(1000, ct);
                     waitedTime += 1000;
                 }
 
@@ -548,11 +558,14 @@ namespace Accountmanager
                     }
                     catch { }
 
-                    await Task.Delay(200);
+                    await Task.Delay(200, ct);
                 }
 
+                ct.ThrowIfCancellationRequested();
                 // Brief delay so the Chromium login form is interactive
-                await Task.Delay(1200);
+                await Task.Delay(1200, ct);
+
+                ct.ThrowIfCancellationRequested();
 
                 SendToFrontend(new { type = "loginProgress", step = 2, totalSteps = 3, message = "Login-Fenster bereit!", status = "done" });
 
@@ -563,6 +576,10 @@ namespace Accountmanager
                 UseSendKeysFallback(loginWindowHandle, username, password);
 
                 SendToFrontend(new { type = "loginProgress", step = 3, totalSteps = 3, message = "Login-Daten wurden eingegeben!", status = "done" });
+            }
+            catch (OperationCanceledException)
+            {
+                SendToFrontend(new { type = "loginProgress", step = 0, totalSteps = 3, message = "Auto-Login abgebrochen.", status = "error" });
             }
             catch (Exception ex)
             {
