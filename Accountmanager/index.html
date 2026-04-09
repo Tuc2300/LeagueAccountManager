@@ -60,7 +60,12 @@
                     <input type="text" id="inputUsername" placeholder="z.B. user@example.com">
                 </div>
                 <div class="form-group">
-                    <label><i class="fas fa-lock"></i> Passwort</label>
+                    <label>
+                        <i class="fas fa-lock"></i> Passwort
+                        <button type="button" class="btn-generate-password" onclick="openPasswordGenerator()" title="Passwort generieren">
+                            <i class="fas fa-wand-magic-sparkles"></i> Generieren
+                        </button>
+                    </label>
                     <div class="password-input-group">
                         <input type="password" id="inputPassword" placeholder="••••••••">
                         <button class="password-toggle-input" onclick="togglePasswordInput()">
@@ -176,6 +181,64 @@
                 <div id="updateProgressFill" class="update-progress-fill" style="width:0%"></div>
             </div>
             <span id="updateProgressText" class="update-progress-text">Wird vorbereitet...</span>
+        </div>
+    </div>
+
+    <!-- Password Generator Modal -->
+    <div id="passwordGenModal" class="modal">
+        <div class="modal-content modal-small">
+            <div class="modal-header">
+                <h2><i class="fas fa-wand-magic-sparkles"></i> Passwort generieren</h2>
+                <button class="modal-close" onclick="closePasswordGenerator()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="pwgen-preview">
+                    <code id="pwgenOutput">••••••••••••</code>
+                    <button class="btn-icon" onclick="regeneratePassword()" title="Neu generieren">
+                        <i class="fas fa-rotate"></i>
+                    </button>
+                </div>
+                <div class="pwgen-strength">
+                    <div class="pwgen-strength-bar"><div id="pwgenStrengthFill"></div></div>
+                    <span id="pwgenStrengthLabel">–</span>
+                </div>
+                <div class="form-group">
+                    <label>Länge: <span id="pwgenLengthLabel">20</span></label>
+                    <input type="range" id="pwgenLength" min="8" max="64" value="20" oninput="regeneratePassword()">
+                </div>
+                <div class="pwgen-options">
+                    <label class="pwgen-option">
+                        <input type="checkbox" id="pwgenUpper" checked onchange="regeneratePassword()">
+                        <span>Großbuchstaben (A-Z)</span>
+                    </label>
+                    <label class="pwgen-option">
+                        <input type="checkbox" id="pwgenLower" checked onchange="regeneratePassword()">
+                        <span>Kleinbuchstaben (a-z)</span>
+                    </label>
+                    <label class="pwgen-option">
+                        <input type="checkbox" id="pwgenDigits" checked onchange="regeneratePassword()">
+                        <span>Ziffern (0-9)</span>
+                    </label>
+                    <label class="pwgen-option">
+                        <input type="checkbox" id="pwgenSymbols" onchange="regeneratePassword()">
+                        <span>Symbole (!@#$...)</span>
+                    </label>
+                    <label class="pwgen-option">
+                        <input type="checkbox" id="pwgenNoAmbig" checked onchange="regeneratePassword()">
+                        <span>Mehrdeutige Zeichen ausschließen (0/O, 1/l/I)</span>
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-cancel" onclick="closePasswordGenerator()">
+                    <i class="fas fa-times"></i> Abbrechen
+                </button>
+                <button class="btn-save" onclick="applyGeneratedPassword()">
+                    <i class="fas fa-check"></i> Übernehmen
+                </button>
+            </div>
         </div>
     </div>
 

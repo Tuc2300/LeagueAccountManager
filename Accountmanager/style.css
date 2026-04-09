@@ -629,6 +629,114 @@ h1 {
 
     .btn-delete-confirm:hover { filter: brightness(1.1); box-shadow: 0 5px 15px rgba(239, 68, 68, 0.4); }
 
+/* Password Generator */
+.btn-generate-password {
+    margin-left: auto;
+    background: var(--accent-soft);
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    transition: all var(--transition);
+    text-transform: none;
+    letter-spacing: 0;
+}
+
+    .btn-generate-password:hover {
+        background: var(--accent);
+        color: white;
+    }
+
+.form-group label {
+    align-items: center;
+}
+
+.pwgen-preview {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 14px 16px;
+    margin-bottom: 14px;
+}
+
+    .pwgen-preview code {
+        flex: 1;
+        font-family: 'Consolas', 'Monaco', monospace;
+        font-size: 15px;
+        color: var(--text);
+        word-break: break-all;
+        user-select: all;
+    }
+
+.pwgen-strength {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 18px;
+}
+
+.pwgen-strength-bar {
+    flex: 1;
+    height: 6px;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+    .pwgen-strength-bar > div {
+        height: 100%;
+        width: 0%;
+        background: var(--accent);
+        transition: width var(--transition), background var(--transition);
+    }
+
+#pwgenStrengthLabel {
+    font-size: 12px;
+    color: var(--text-muted);
+    min-width: 110px;
+    text-align: right;
+}
+
+.pwgen-options {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.pwgen-option {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    color: var(--text-muted);
+    cursor: pointer;
+    user-select: none;
+}
+
+    .pwgen-option input[type="checkbox"] {
+        width: 16px;
+        height: 16px;
+        accent-color: var(--accent);
+        cursor: pointer;
+    }
+
+    .pwgen-option:hover span { color: var(--text); }
+
+input[type="range"] {
+    width: 100%;
+    accent-color: var(--accent);
+}
+
 /* Settings */
 .settings-section {
     margin-bottom: 22px;
