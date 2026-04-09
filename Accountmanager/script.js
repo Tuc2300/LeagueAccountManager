@@ -549,6 +549,107 @@ window.onclick = function (event) {
 }
 
 // Initial laden
+// === Password Generator ===
+function openPasswordGenerator() {
+    document.getElementById('passwordGenModal').classList.add('show');
+    regeneratePassword();
+}
+
+function closePasswordGenerator() {
+    document.getElementById('passwordGenModal').classList.remove('show');
+}
+
+function regeneratePassword() {
+    const length = parseInt(document.getElementById('pwgenLength').value, 10);
+    document.getElementById('pwgenLengthLabel').textContent = length;
+
+    const useUpper   = document.getElementById('pwgenUpper').checked;
+    const useLower   = document.getElementById('pwgenLower').checked;
+    const useDigits  = document.getElementById('pwgenDigits').checked;
+    const useSymbols = document.getElementById('pwgenSymbols').checked;
+    const noAmbig    = document.getElementById('pwgenNoAmbig').checked;
+
+    let upper = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    let lower = 'abcdefghijklmnopqrstuvwxyz';
+    let digits = '0123456789';
+    let symbols = '!@#$%^&*()-_=+[]{};:,.<>?';
+
+    if (noAmbig) {
+        upper  = upper.replace(/[OI]/g, '');
+        lower  = lower.replace(/[loi]/g, '');
+        digits = digits.replace(/[01]/g, '');
+    }
+
+    const groups = [];
+    if (useUpper)   groups.push(upper);
+    if (useLower)   groups.push(lower);
+    if (useDigits)  groups.push(digits);
+    if (useSymbols) groups.push(symbols);
+
+    if (groups.length === 0) {
+        document.getElementById('pwgenOutput').textContent = '— mindestens eine Option wählen —';
+        updatePasswordStrength('', 0);
+        return;
+    }
+
+    const all = groups.join('');
+    const arr = new Uint32Array(length);
+    crypto.getRandomValues(arr);
+
+    // Ensure at least one char from each selected group
+    const result = new Array(length);
+    groups.forEach((g, i) => {
+        if (i < length) result[i] = g[arr[i] % g.length];
+    });
+    for (let i = groups.length; i < length; i++) {
+        result[i] = all[arr[i] % all.length];
+    }
+    // Fisher-Yates shuffle using fresh randomness
+    const shuffleRnd = new Uint32Array(length);
+    crypto.getRandomValues(shuffleRnd);
+    for (let i = length - 1; i > 0; i--) {
+        const j = shuffleRnd[i] % (i + 1);
+        [result[i], result[j]] = [result[j], result[i]];
+    }
+
+    const password = result.join('');
+    document.getElementById('pwgenOutput').textContent = password;
+    updatePasswordStrength(password, groups.length);
+}
+
+function updatePasswordStrength(password, groupCount) {
+    const fill = document.getElementById('pwgenStrengthFill');
+    const label = document.getElementById('pwgenStrengthLabel');
+    const len = password.length;
+
+    // Rough entropy-based score
+    let alphabetSize = 0;
+    if (/[A-Z]/.test(password)) alphabetSize += 26;
+    if (/[a-z]/.test(password)) alphabetSize += 26;
+    if (/[0-9]/.test(password)) alphabetSize += 10;
+    if (/[^A-Za-z0-9]/.test(password)) alphabetSize += 24;
+    const bits = len > 0 ? Math.round(len * Math.log2(alphabetSize || 1)) : 0;
+
+    let pct = Math.min(100, Math.round((bits / 128) * 100));
+    let name = 'Schwach', color = '#ef4444';
+    if (bits >= 40)  { name = 'OK';        color = '#f59e0b'; }
+    if (bits >= 60)  { name = 'Gut';       color = '#10b981'; }
+    if (bits >= 90)  { name = 'Stark';     color = '#06b6d4'; }
+    if (bits >= 120) { name = 'Exzellent'; color = 'var(--accent)'; }
+
+    fill.style.width = pct + '%';
+    fill.style.background = color;
+    label.textContent = len > 0 ? `${name} (${bits} bit)` : '–';
+}
+
+function applyGeneratedPassword() {
+    const pw = document.getElementById('pwgenOutput').textContent;
+    if (!pw || pw.startsWith('—')) return;
+    document.getElementById('inputPassword').value = pw;
+    closePasswordGenerator();
+    showToast('Passwort übernommen', 'success');
+}
+
 // === Settings / Personalization ===
 const ACCENT_PRESETS = [
     { name: 'purple', color: '#a855f7', color2: '#8b5cf6' },

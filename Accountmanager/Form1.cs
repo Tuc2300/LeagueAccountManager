@@ -714,30 +714,43 @@ catch {
             }
         }
 
+        private static void FocusRiotWindow(IntPtr windowHandle)
+        {
+            IntPtr hwnd = windowHandle;
+            if (hwnd == IntPtr.Zero) hwnd = FindRiotClientWindow();
+            if (hwnd == IntPtr.Zero) return;
+            try
+            {
+                if (IsIconic(hwnd)) ShowWindow(hwnd, 9 /* SW_RESTORE */);
+                SetForegroundWindow(hwnd);
+            }
+            catch { }
+        }
+
         private void UseSendKeysFallback(IntPtr windowHandle, string username, string password)
         {
             try
             {
-                if (windowHandle == IntPtr.Zero)
-                {
-                    windowHandle = FindRiotClientWindow();
-                }
-                if (windowHandle != IntPtr.Zero)
-                {
-                    SetForegroundWindow(windowHandle);
-                    System.Threading.Thread.Sleep(400);
-                }
+                // Focus before username
+                FocusRiotWindow(windowHandle);
+                System.Threading.Thread.Sleep(400);
 
                 // Select all in case there's existing text, then type username
                 SendKeys.SendWait("^(a)");
                 System.Threading.Thread.Sleep(100);
-                SendKeys.SendWait(username);
+                SendKeys.SendWait(EscapeForSendKeys(username));
                 System.Threading.Thread.Sleep(300);
 
-                // Tab to password and enter it
+                // Tab to password field
                 SendKeys.SendWait("{TAB}");
-                System.Threading.Thread.Sleep(300);
-                SendKeys.SendWait(password);
+                System.Threading.Thread.Sleep(250);
+
+                // Re-focus the Riot Client window before typing the password,
+                // in case focus was stolen by another window (notifications, etc.)
+                FocusRiotWindow(windowHandle);
+                System.Threading.Thread.Sleep(250);
+
+                SendKeys.SendWait(EscapeForSendKeys(password));
                 System.Threading.Thread.Sleep(300);
 
                 // Submit
@@ -749,8 +762,35 @@ catch {
             }
         }
 
+        private static string EscapeForSendKeys(string input)
+        {
+            if (string.IsNullOrEmpty(input)) return input;
+            var sb = new StringBuilder(input.Length);
+            foreach (char c in input)
+            {
+                switch (c)
+                {
+                    case '+': case '^': case '%': case '~':
+                    case '(': case ')': case '{': case '}':
+                    case '[': case ']':
+                        sb.Append('{').Append(c).Append('}');
+                        break;
+                    default:
+                        sb.Append(c);
+                        break;
+                }
+            }
+            return sb.ToString();
+        }
+
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool IsIconic(IntPtr hWnd);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
         private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
