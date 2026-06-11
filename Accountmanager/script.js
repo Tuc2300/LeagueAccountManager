@@ -2,7 +2,6 @@
 let currentEditId = null;
 let deleteId = null;
 
-// DOM-Elemente
 const accountList = document.getElementById('accountList');
 const searchInput = document.getElementById('searchInput');
 const addBtn = document.getElementById('addBtn');
@@ -18,16 +17,14 @@ const toast = document.getElementById('toast');
 const toastMessage = document.getElementById('toastMessage');
 const toastIcon = document.getElementById('toastIcon');
 
-// WebView2 Kommunikation mit C#
 let _msgIdCounter = 0;
-function sendMessageToCSharp(action, data = null) {
+function sendMessageToCSharp(action, data = null, timeoutMs = 5000) {
     return new Promise((resolve, reject) => {
         const messageId = (Date.now() * 1000) + (++_msgIdCounter);
         const message = { action, data };
 
         window.chrome.webview.postMessage({ ...message, messageId });
 
-        // Listener für Response
         const handler = (event) => {
             const response = event.data;
             if (response.messageId === messageId) {
@@ -42,15 +39,13 @@ function sendMessageToCSharp(action, data = null) {
 
         window.chrome.webview.addEventListener('message', handler);
 
-        // Timeout nach 5 Sekunden
         setTimeout(() => {
             window.chrome.webview.removeEventListener('message', handler);
             reject(new Error('Timeout'));
-        }, 5000);
+        }, timeoutMs);
     });
 }
 
-// Backend-API Funktionen
 async function loadAccounts() {
     try {
         const data = await sendMessageToCSharp('GET_ACCOUNTS');
@@ -174,8 +169,6 @@ function renderAccounts(accountsToRender = accounts) {
     });
 }
 
-
-// Region-Namen für Anzeige
 function getRegionName(region) {
     const regionMap = {
         'euw': 'EU West',
@@ -193,7 +186,6 @@ function getRegionName(region) {
     return regionMap[region] || region;
 }
 
-// Auto-Login Funktion
 async function autoLogin(id) {
     const account = accounts.find(acc => acc.id === id);
 
@@ -217,7 +209,6 @@ async function autoLogin(id) {
     }
 }
 
-// Login Progress Modal
 function openLoginProgress() {
     for (let i = 1; i <= 3; i++) {
         const step = document.getElementById('loginStep' + i);
@@ -242,7 +233,6 @@ function cancelLoginProgress() {
 function updateLoginProgress(data) {
     const { step, totalSteps, message, status } = data;
 
-    // Update all steps
     for (let i = 1; i <= totalSteps; i++) {
         const stepEl = document.getElementById('loginStep' + i);
         if (!stepEl) continue;
@@ -277,7 +267,6 @@ function updateLoginProgress(data) {
     }
 }
 
-// Update Banner
 let pendingUpdateUrl = null;
 
 function showUpdateBanner(data) {
@@ -330,7 +319,6 @@ function updateReady(data) {
     }
 }
 
-// Global message listener for push messages from C#
 window.chrome.webview.addEventListener('message', (event) => {
     const data = event.data;
     if (!data || !data.type) return;
@@ -351,17 +339,19 @@ window.chrome.webview.addEventListener('message', (event) => {
         case 'toast':
             showToast(data.message, data.level || 'info');
             break;
+        case 'accountsRefreshed':
+        case 'accountsImported':
+            loadAccounts();
+            break;
     }
 });
 
 
-// OP.GG öffnen
 function openOpGG(region, name, tag) {
     const url = `https://op.gg/lol/summoners/${region}/${name}-${tag}`;
     window.open(url, '_blank');
 }
 
-// Toast Notification anzeigen
 function showToast(message, type = 'success') {
     toastMessage.textContent = message;
     toast.className = `toast show ${type}`;
@@ -386,7 +376,6 @@ function showToast(message, type = 'success') {
     }, 3000);
 }
 
-// Modal öffnen
 function openModal(editId = null) {
     currentEditId = editId;
 
@@ -410,13 +399,11 @@ function openModal(editId = null) {
     accountModal.classList.add('show');
 }
 
-// Modal schließen
 function closeModal() {
     accountModal.classList.remove('show');
     currentEditId = null;
 }
 
-// Account speichern
 async function saveAccount() {
     const name = inputName.value.trim();
     const tag = inputTag.value.trim();
@@ -440,7 +427,6 @@ async function saveAccount() {
     closeModal();
 }
 
-// Passwort im Input anzeigen/verbergen
 function togglePasswordInput() {
     const inputEye = document.getElementById('inputEye');
     if (inputPassword.type === 'password') {
@@ -452,7 +438,6 @@ function togglePasswordInput() {
     }
 }
 
-// Passwort in Liste anzeigen/verbergen
 function togglePassword(id) {
     const account = accounts.find(acc => acc.id === id);
     const passText = document.getElementById(`pass-${id}`);
@@ -467,11 +452,21 @@ function togglePassword(id) {
     }
 }
 
-// Passwort kopieren
+let _clipboardClearTimer = null;
+
 function copyPassword(id) {
     const account = accounts.find(acc => acc.id === id);
     navigator.clipboard.writeText(account.password).then(() => {
-        showToast('Passwort in Zwischenablage kopiert!', 'info');
+        showToast('Passwort kopiert – wird in 30 Sek. gelöscht', 'info');
+
+        if (_clipboardClearTimer) clearTimeout(_clipboardClearTimer);
+        _clipboardClearTimer = setTimeout(() => {
+            navigator.clipboard.readText().then(current => {
+                if (current === account.password)
+                    navigator.clipboard.writeText('');
+            }).catch(() => {});
+            _clipboardClearTimer = null;
+        }, 30000);
     }).catch(() => {
         showToast('Fehler beim Kopieren!', 'error');
     });
@@ -496,7 +491,6 @@ function copyUsernameOnly(id) {
     });
 }
 
-// Suche
 searchInput.addEventListener('input', (e) => {
     const searchTerm = e.target.value.toLowerCase();
     const filtered = accounts.filter(acc =>
@@ -508,29 +502,24 @@ searchInput.addEventListener('input', (e) => {
     renderAccounts(filtered);
 });
 
-// Neuen Account Button
 addBtn.addEventListener('click', () => {
     openModal();
 });
 
-// Account bearbeiten
 function editAccount(id) {
     openModal(id);
 }
 
-// Löschen-Modal öffnen
 function deleteAccount(id) {
     deleteId = id;
     deleteModal.classList.add('show');
 }
 
-// Löschen-Modal schließen
 function closeDeleteModal() {
     deleteModal.classList.remove('show');
     deleteId = null;
 }
 
-// Löschen bestätigen
 async function confirmDelete() {
     if (deleteId) {
         await deleteAccountById(deleteId);
@@ -538,7 +527,6 @@ async function confirmDelete() {
     }
 }
 
-// Modal schließen beim Klick außerhalb
 window.onclick = function (event) {
     if (event.target === accountModal) {
         closeModal();
@@ -548,8 +536,6 @@ window.onclick = function (event) {
     }
 }
 
-// Initial laden
-// === Password Generator ===
 function openPasswordGenerator() {
     document.getElementById('passwordGenModal').classList.add('show');
     regeneratePassword();
@@ -596,7 +582,6 @@ function regeneratePassword() {
     const arr = new Uint32Array(length);
     crypto.getRandomValues(arr);
 
-    // Ensure at least one char from each selected group
     const result = new Array(length);
     groups.forEach((g, i) => {
         if (i < length) result[i] = g[arr[i] % g.length];
@@ -604,7 +589,6 @@ function regeneratePassword() {
     for (let i = groups.length; i < length; i++) {
         result[i] = all[arr[i] % all.length];
     }
-    // Fisher-Yates shuffle using fresh randomness
     const shuffleRnd = new Uint32Array(length);
     crypto.getRandomValues(shuffleRnd);
     for (let i = length - 1; i > 0; i--) {
@@ -622,7 +606,6 @@ function updatePasswordStrength(password, groupCount) {
     const label = document.getElementById('pwgenStrengthLabel');
     const len = password.length;
 
-    // Rough entropy-based score
     let alphabetSize = 0;
     if (/[A-Z]/.test(password)) alphabetSize += 26;
     if (/[a-z]/.test(password)) alphabetSize += 26;
@@ -650,7 +633,6 @@ function applyGeneratedPassword() {
     showToast('Passwort übernommen', 'success');
 }
 
-// === Settings / Personalization ===
 const ACCENT_PRESETS = [
     { name: 'purple', color: '#a855f7', color2: '#8b5cf6' },
     { name: 'blue',   color: '#3b82f6', color2: '#2563eb' },
@@ -741,7 +723,51 @@ function resetSettings() {
     showToast('Einstellungen zurückgesetzt', 'info');
 }
 
-// Show debug-only update test button if a debugger is attached
+async function exportKey() {
+    closeSettings();
+    try {
+        await sendMessageToCSharp('EXPORT_KEY', null, 120000);
+    } catch (err) {
+        if (err.message !== 'Timeout') showToast('Fehler: ' + err.message, 'error');
+    }
+}
+
+async function changeKey() {
+    closeSettings();
+    try {
+        await sendMessageToCSharp('CHANGE_KEY', null, 120000);
+    } catch (err) {
+        if (err.message !== 'Timeout') showToast('Fehler: ' + err.message, 'error');
+    }
+}
+
+async function exportAccountsPlain() {
+    closeSettings();
+    try {
+        await sendMessageToCSharp('EXPORT_ACCOUNTS_PLAIN', null, 120000);
+    } catch (err) {
+        if (err.message !== 'Timeout') showToast('Fehler: ' + err.message, 'error');
+    }
+}
+
+async function exportAccountsEncrypted() {
+    closeSettings();
+    try {
+        await sendMessageToCSharp('EXPORT_ACCOUNTS_ENCRYPTED', null, 120000);
+    } catch (err) {
+        if (err.message !== 'Timeout') showToast('Fehler: ' + err.message, 'error');
+    }
+}
+
+async function importAccounts() {
+    closeSettings();
+    try {
+        await sendMessageToCSharp('IMPORT_ACCOUNTS', null, 120000);
+    } catch (err) {
+        if (err.message !== 'Timeout') showToast('Fehler: ' + err.message, 'error');
+    }
+}
+
 sendMessageToCSharp('IS_DEBUGGER_ATTACHED').then(res => {
     if (res && res.attached) {
         document.getElementById('debugUpdateBtn').style.display = '';

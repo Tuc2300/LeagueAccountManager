@@ -7,6 +7,7 @@ using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Microsoft.Web.WebView2.Core;
 
@@ -14,7 +15,7 @@ namespace Accountmanager
 {
     public partial class Form1 : Form
     {
-        private const string CURRENT_VERSION = "1.3.3";
+        private const string CURRENT_VERSION = "1.4.0";
         private const string GITHUB_REPO_OWNER = "Tuc2300";
         private const string GITHUB_REPO_NAME = "LeagueAccountManager";
         private List<Account> accounts = new List<Account>();
@@ -23,11 +24,11 @@ namespace Accountmanager
         private string pendingUpdateDownloadUrl = null;
         private string pendingUpdateScript = null;
         private System.Threading.CancellationTokenSource autoLoginCts = null;
+        private AppSettings? _settings;
 
         public Form1()
         {
             InitializeComponent();
-            LoadAccounts();
             InitializeAsync();
         }
 
@@ -336,9 +337,18 @@ try {
     }
     Write-Log ""Backup OK -> $BackupDir""
 
-    # 3. Neue Dateien rüberkopieren
+    # 3. Neue Dateien rüberkopieren (Nutzerdaten werden nie überschrieben)
+    $ProtectedNames = @('accounts.json', 'settings.json', 'LeagueAccountManager.flag')
     Write-Log 'Kopiere neue Dateien...'
     Get-ChildItem -LiteralPath $ExtractDir -Force | ForEach-Object {
+        if ($ProtectedNames -contains $_.Name) {
+            Write-Log ""Überspringe geschützte Datei: $($_.Name)"" 'WARN'
+            return
+        }
+        if ($_.Extension -ieq '.lamkey') {
+            Write-Log ""Überspringe Schlüsseldatei: $($_.Name)"" 'WARN'
+            return
+        }
         $dest = Join-Path $InstallDir $_.Name
         if (Test-Path -LiteralPath $dest) {
             Remove-Item -LiteralPath $dest -Recurse -Force -ErrorAction SilentlyContinue
@@ -559,6 +569,39 @@ catch {
                             }
                             break;
 
+                        case "EXPORT_ACCOUNTS_PLAIN":
+                            ExportAccountsPlain();
+                            responseData = new { success = true };
+                            break;
+
+                        case "EXPORT_ACCOUNTS_ENCRYPTED":
+                            ExportAccountsEncrypted();
+                            responseData = new { success = true };
+                            break;
+
+                        case "EXPORT_KEY":
+                            ExportKeyFile();
+                            responseData = new { success = true };
+                            break;
+
+                        case "CHANGE_KEY":
+                            ChangeKey();
+                            responseData = new { success = true };
+                            break;
+
+                        case "IMPORT_ACCOUNTS":
+                            ImportAccounts();
+                            responseData = new { success = true };
+                            break;
+
+                        case "GET_KEY_INFO":
+                            responseData = new
+                            {
+                                keyFilePath = _settings?.KeyFilePath ?? "",
+                                hasKey = SecureStorage.IsInitialized
+                            };
+                            break;
+
                         default:
                             success = false;
                             error = "Unbekannte Aktion: " + action;
@@ -689,8 +732,9 @@ catch {
                 }
 
                 ct.ThrowIfCancellationRequested();
-                // Brief delay so the Chromium login form is interactive
-                await Task.Delay(3200, ct);
+                // Wait for the Chromium login form to be fully rendered and interactive.
+                // 4500ms covers slower machines where 3200ms was not always enough.
+                await Task.Delay(4500, ct);
 
                 ct.ThrowIfCancellationRequested();
 
@@ -731,60 +775,66 @@ catch {
         {
             try
             {
-                // Focus before username
+                // Bring the Riot Client to the foreground and wait for Chromium to settle.
                 FocusRiotWindow(windowHandle);
-                System.Threading.Thread.Sleep(400);
+                System.Threading.Thread.Sleep(700);
 
-                // Select all in case there's existing text, then type username
-                SendKeys.SendWait("^(a)");
+                // If the user clicked on another app (e.g. Discord) during the settle
+                // delay, reclaim the Riot window now — right before we start typing.
+                // This is the last safe moment to re-focus: from here on we type without
+                // interruption so there is no window for keystrokes to land elsewhere.
+                if (GetForegroundWindow() != windowHandle)
+                {
+                    FocusRiotWindow(windowHandle);
+                    System.Threading.Thread.Sleep(400);
+                }
+
+                // Dismiss any open autocomplete dropdown
+                SendKeys.SendWait("{ESC}");
                 System.Threading.Thread.Sleep(100);
-                SendKeys.SendWait(EscapeForSendKeys(username));
-                System.Threading.Thread.Sleep(300);
 
-                // Tab to password field
+                // Select all in the username field and paste via clipboard.
+                // Clipboard paste is more reliable than SendKeys char-by-char for
+                // passwords that contain special characters (+, ^, %, ~, etc.).
+                SendKeys.SendWait("^(a)");
+                System.Threading.Thread.Sleep(60);
+                this.Invoke((MethodInvoker)(() => Clipboard.SetText(username)));
+                SendKeys.SendWait("^(v)");
+                System.Threading.Thread.Sleep(150);
+
+                // Tab to the password field.
+                // IMPORTANT: do NOT call FocusRiotWindow() here. Calling
+                // SetForegroundWindow() on an already-foreground Chromium window
+                // resets its internal focus back to the first input (username),
+                // which is what caused the "username typed twice" bug.
                 SendKeys.SendWait("{TAB}");
-                System.Threading.Thread.Sleep(250);
+                System.Threading.Thread.Sleep(200);
 
-                // Re-focus the Riot Client window before typing the password,
-                // in case focus was stolen by another window (notifications, etc.)
-                FocusRiotWindow(windowHandle);
-                System.Threading.Thread.Sleep(250);
+                // Clear any pre-filled content in the password field, then paste
+                SendKeys.SendWait("^(a)");
+                System.Threading.Thread.Sleep(60);
+                this.Invoke((MethodInvoker)(() => Clipboard.SetText(password)));
+                SendKeys.SendWait("^(v)");
+                System.Threading.Thread.Sleep(150);
 
-                SendKeys.SendWait(EscapeForSendKeys(password));
-                System.Threading.Thread.Sleep(300);
-
-                // Submit
+                // Submit the form
                 SendKeys.SendWait("{ENTER}");
+
+                // Clear the clipboard so credentials don't linger there
+                System.Threading.Thread.Sleep(300);
+                this.Invoke((MethodInvoker)(() => Clipboard.Clear()));
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"SendKeys Fallback fehlgeschlagen: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"Auto Login fehlgeschlagen: {ex.Message}");
             }
-        }
-
-        private static string EscapeForSendKeys(string input)
-        {
-            if (string.IsNullOrEmpty(input)) return input;
-            var sb = new StringBuilder(input.Length);
-            foreach (char c in input)
-            {
-                switch (c)
-                {
-                    case '+': case '^': case '%': case '~':
-                    case '(': case ')': case '{': case '}':
-                    case '[': case ']':
-                        sb.Append('{').Append(c).Append('}');
-                        break;
-                    default:
-                        sb.Append(c);
-                        break;
-                }
-            }
-            return sb.ToString();
         }
 
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern IntPtr GetForegroundWindow();
 
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         private static extern bool IsIconic(IntPtr hWnd);
@@ -948,17 +998,19 @@ catch {
             try
             {
                 string filePath = Path.Combine(System.Windows.Forms.Application.StartupPath, "accounts.json");
+                string tempPath = filePath + ".tmp";
                 var options = new JsonSerializerOptions { WriteIndented = true };
                 string json = JsonSerializer.Serialize(accounts, options);
-                File.WriteAllText(filePath, json);
+                // Write to a temp file first, then atomically replace the real file.
+                // This ensures a failed write never corrupts the existing accounts.
+                File.WriteAllText(tempPath, json);
+                File.Move(tempPath, filePath, overwrite: true);
             }
             catch (Exception ex)
             {
                 MessageBox.Show($"Fehler beim Speichern der Accounts: {ex.Message}");
             }
         }
-
-        private bool _aboutShown = false;
 
         private void ShowAbout()
         {
@@ -978,6 +1030,17 @@ catch {
 
         private void Form1_Load(object sender, EventArgs e)
         {
+            _settings = AppSettings.Load();
+            SetupKeyFlow();
+            if (!SecureStorage.IsInitialized) return; // User cancelled — Application.Exit already queued
+            MigrateIfNeeded();
+            LoadAccounts();
+
+            // WebView may already be initialized and waiting for accounts (SetupKeyFlow/MigrateIfNeeded
+            // run inner message loops that let the WebView initialize while dialogs are open)
+            if (webView21.CoreWebView2 != null)
+                SendToFrontend(new { type = "accountsRefreshed" });
+
             string flagFile = Path.Combine(System.Windows.Forms.Application.StartupPath, "LeagueAccountManager.flag");
 
             if (!File.Exists(flagFile))
@@ -993,6 +1056,394 @@ catch {
                 {
                     System.Diagnostics.Debug.WriteLine($"Flag creation failed: {ex.Message}");
                 }
+            }
+        }
+
+        private void SetupKeyFlow()
+        {
+            // Key already configured and file exists → just load it
+            if (!string.IsNullOrEmpty(_settings!.KeyFilePath) && File.Exists(_settings.KeyFilePath))
+            {
+                try
+                {
+                    SecureStorage.Initialize(KeyManager.LoadKeyFromFile(_settings.KeyFilePath));
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(
+                        $"Schlüsseldatei konnte nicht geladen werden:\n{ex.Message}\n\nBitte wähle eine neue Schlüsseldatei.",
+                        "Schlüssel-Fehler", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+            }
+
+            // Loop until the user provides a valid key (or exits the app)
+            while (!SecureStorage.IsInitialized)
+            {
+                var result = MessageBox.Show(
+                    "Kein Schlüssel gefunden.\n\n" +
+                    "Klicke 'Ja' um einen neuen Schlüssel zu erstellen,\n" +
+                    "oder 'Nein' um eine vorhandene Schlüsseldatei zu laden.\n\n" +
+                    "Abbrechen beendet die App.",
+                    "Schlüssel-Einrichtung",
+                    MessageBoxButtons.YesNoCancel,
+                    MessageBoxIcon.Question);
+
+                if (result == DialogResult.Cancel) { System.Windows.Forms.Application.Exit(); return; }
+                if (result == DialogResult.Yes) CreateNewKey();
+                else LoadExistingKey();
+            }
+        }
+
+        private void CreateNewKey()
+        {
+            using var dlg = new SaveFileDialog
+            {
+                Title = "Schlüsseldatei speichern",
+                Filter = "Schlüsseldatei (*.lamkey)|*.lamkey|Alle Dateien (*.*)|*.*",
+                FileName = "accountmanager.lamkey",
+                OverwritePrompt = true
+            };
+            if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+            try
+            {
+                var key = KeyManager.GenerateKey();
+                KeyManager.SaveKeyToFile(key, dlg.FileName);
+                SecureStorage.Initialize(key);
+                _settings!.KeyFilePath = dlg.FileName;
+                _settings.Save();
+
+                MessageBox.Show(
+                    $"Schlüssel erstellt und gespeichert:\n{dlg.FileName}\n\n" +
+                    "Wichtig: Bewahre diese Datei sicher auf!\n" +
+                    "Ohne den Schlüssel können deine Passwörter nicht wiederhergestellt werden.",
+                    "Schlüssel erstellt", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Fehler beim Erstellen des Schlüssels:\n{ex.Message}",
+                    "Fehler", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void LoadExistingKey()
+        {
+            using var dlg = new OpenFileDialog
+            {
+                Title = "Schlüsseldatei öffnen",
+                Filter = "Schlüsseldatei (*.lamkey)|*.lamkey|Alle Dateien (*.*)|*.*"
+            };
+            if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+            try
+            {
+                SecureStorage.Initialize(KeyManager.LoadKeyFromFile(dlg.FileName));
+                _settings!.KeyFilePath = dlg.FileName;
+                _settings.Save();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Fehler beim Laden der Schlüsseldatei:\n{ex.Message}",
+                    "Fehler", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void MigrateIfNeeded()
+        {
+            if (_settings!.MigratedFromDpapi) return;
+
+            string filePath = Path.Combine(System.Windows.Forms.Application.StartupPath, "accounts.json");
+            if (!File.Exists(filePath))
+            {
+                _settings.MigratedFromDpapi = true;
+                _settings.Save();
+                return;
+            }
+
+            try
+            {
+                string json = File.ReadAllText(filePath);
+                var rawAccounts = JsonSerializer.Deserialize<List<Account>>(json) ?? new List<Account>();
+
+                bool needsMigration = rawAccounts.Any(a => SecureStorage.IsLegacyEncrypted(a.Password));
+                if (!needsMigration)
+                {
+                    _settings.MigratedFromDpapi = true;
+                    _settings.Save();
+                    return;
+                }
+
+                var confirm = MessageBox.Show(
+                    $"Es wurden {rawAccounts.Count(a => SecureStorage.IsLegacyEncrypted(a.Password))} " +
+                    "Passwörter im alten Windows-Format gefunden.\n\n" +
+                    "Diese werden jetzt auf deinen neuen Schlüssel umgestellt.\n" +
+                    "Klicke OK um fortzufahren.",
+                    "Passwörter migrieren", MessageBoxButtons.OKCancel, MessageBoxIcon.Information);
+
+                if (confirm != DialogResult.OK) return;
+
+                int migrated = 0;
+                foreach (var account in rawAccounts)
+                {
+                    if (SecureStorage.IsLegacyEncrypted(account.Password))
+                    {
+                        string plain = SecureStorage.Decrypt(account.Password);
+                        account.Password = SecureStorage.Encrypt(plain);
+                        migrated++;
+                    }
+                }
+
+                var opts = new JsonSerializerOptions { WriteIndented = true };
+                File.WriteAllText(filePath, JsonSerializer.Serialize(rawAccounts, opts));
+
+                _settings.MigratedFromDpapi = true;
+                _settings.Save();
+
+                MessageBox.Show($"{migrated} Passwörter erfolgreich migriert!",
+                    "Migration abgeschlossen", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    $"Migration fehlgeschlagen:\n{ex.Message}\n\nDie App wird trotzdem gestartet.",
+                    "Migrationsfehler", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private void ExportAccountsPlain()
+        {
+            if (MessageBox.Show(
+                    "Die Passwörter werden im Klartext gespeichert.\n\nJeder der Zugriff auf diese Datei hat, kann alle Passwörter lesen!\n\nTrotzdem fortfahren?",
+                    "Sicherheitshinweis", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+                return;
+
+            using var dlg = new SaveFileDialog
+            {
+                Title = "Accounts als Klartext exportieren",
+                Filter = "JSON Datei (*.json)|*.json|Alle Dateien (*.*)|*.*",
+                FileName = $"accounts_export_{DateTime.Now:yyyyMMdd_HHmmss}.json"
+            };
+            if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+            var decrypted = accounts.Select(a => new Account
+            {
+                Id = a.Id, Name = a.Name, Tag = a.Tag,
+                Username = a.Username,
+                Password = SecureStorage.Decrypt(a.Password),
+                Region = a.Region, Created = a.Created
+            }).ToList();
+
+            var opts = new JsonSerializerOptions { WriteIndented = true };
+            File.WriteAllText(dlg.FileName, JsonSerializer.Serialize(decrypted, opts));
+
+            SendToFrontend(new { type = "toast", message = $"Klartext-Export gespeichert: {Path.GetFileName(dlg.FileName)}", level = "success" });
+        }
+
+        private void ExportAccountsEncrypted()
+        {
+            using var dlg = new SaveFileDialog
+            {
+                Title = "Accounts verschlüsselt exportieren",
+                Filter = "Verschlüsselte Sicherung (*.lamenc)|*.lamenc|Alle Dateien (*.*)|*.*",
+                FileName = $"accounts_backup_{DateTime.Now:yyyyMMdd_HHmmss}.lamenc"
+            };
+            if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+            var decrypted = accounts.Select(a => new Account
+            {
+                Id = a.Id, Name = a.Name, Tag = a.Tag,
+                Username = a.Username,
+                Password = SecureStorage.Decrypt(a.Password),
+                Region = a.Region, Created = a.Created
+            }).ToList();
+
+            var opts = new JsonSerializerOptions { WriteIndented = true };
+            string plainJson = JsonSerializer.Serialize(decrypted, opts);
+            string encrypted = SecureStorage.Encrypt(plainJson);
+
+            var wrapper = new { format = "lamenc-v1", data = encrypted };
+            File.WriteAllText(dlg.FileName, JsonSerializer.Serialize(wrapper, opts));
+
+            SendToFrontend(new { type = "toast", message = $"Verschlüsselte Sicherung gespeichert: {Path.GetFileName(dlg.FileName)}", level = "success" });
+        }
+
+        private void ExportKeyFile()
+        {
+            if (string.IsNullOrEmpty(_settings?.KeyFilePath) || !File.Exists(_settings.KeyFilePath))
+            {
+                MessageBox.Show("Keine Schlüsseldatei konfiguriert.", "Fehler", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            using var dlg = new SaveFileDialog
+            {
+                Title = "Schlüssel-Backup speichern",
+                Filter = "Schlüsseldatei (*.lamkey)|*.lamkey|Alle Dateien (*.*)|*.*",
+                FileName = "accountmanager_backup.lamkey"
+            };
+            if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+            File.Copy(_settings.KeyFilePath, dlg.FileName, overwrite: true);
+            SendToFrontend(new { type = "toast", message = $"Schlüssel-Backup gespeichert: {Path.GetFileName(dlg.FileName)}", level = "success" });
+        }
+
+        private void ChangeKey()
+        {
+            var choice = MessageBox.Show(
+                "Möchtest du einen neuen Schlüssel generieren oder einen vorhandenen laden?\n\n" +
+                "Ja = Neuen Schlüssel generieren\n" +
+                "Nein = Vorhandene Schlüsseldatei laden",
+                "Schlüssel wechseln", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+
+            if (choice == DialogResult.Cancel) return;
+
+            byte[]? newKey = null;
+            string? newKeyPath = null;
+
+            if (choice == DialogResult.Yes)
+            {
+                using var dlg = new SaveFileDialog
+                {
+                    Title = "Neuen Schlüssel speichern",
+                    Filter = "Schlüsseldatei (*.lamkey)|*.lamkey|Alle Dateien (*.*)|*.*",
+                    FileName = "accountmanager_new.lamkey"
+                };
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                newKey = KeyManager.GenerateKey();
+                KeyManager.SaveKeyToFile(newKey, dlg.FileName);
+                newKeyPath = dlg.FileName;
+            }
+            else
+            {
+                using var dlg = new OpenFileDialog
+                {
+                    Title = "Schlüsseldatei öffnen",
+                    Filter = "Schlüsseldatei (*.lamkey)|*.lamkey|Alle Dateien (*.*)|*.*"
+                };
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                try
+                {
+                    newKey = KeyManager.LoadKeyFromFile(dlg.FileName);
+                    newKeyPath = dlg.FileName;
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Fehler beim Laden der Schlüsseldatei:\n{ex.Message}",
+                        "Fehler", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+            }
+
+            try
+            {
+                // Decrypt all passwords with the current key first
+                var decryptedPasswords = accounts.ToDictionary(a => a.Id, a => SecureStorage.Decrypt(a.Password));
+
+                // Switch to new key and re-encrypt
+                SecureStorage.Initialize(newKey);
+                _settings!.KeyFilePath = newKeyPath;
+
+                foreach (var account in accounts)
+                    account.Password = SecureStorage.Encrypt(decryptedPasswords[account.Id]);
+
+                SaveAccounts();
+                _settings.Save();
+
+                SendToFrontend(new { type = "toast", message = "Schlüssel erfolgreich gewechselt und alle Passwörter neu verschlüsselt!", level = "success" });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Fehler beim Schlüsselwechsel:\n{ex.Message}",
+                    "Fehler", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void ImportAccounts()
+        {
+            using var dlg = new OpenFileDialog
+            {
+                Title = "Accounts importieren",
+                Filter = "Alle unterstützten Formate (*.json;*.lamenc)|*.json;*.lamenc|JSON Datei (*.json)|*.json|Verschlüsselte Sicherung (*.lamenc)|*.lamenc|Alle Dateien (*.*)|*.*"
+            };
+            if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+            try
+            {
+                string fileContent = File.ReadAllText(dlg.FileName);
+                List<Account>? imported = null;
+
+                // Try encrypted .lamenc format first
+                try
+                {
+                    var wrapper = JsonSerializer.Deserialize<JsonObject>(fileContent);
+                    if (wrapper != null && wrapper["format"]?.ToString() == "lamenc-v1")
+                    {
+                        string encData = wrapper["data"]?.ToString() ?? "";
+                        try
+                        {
+                            string plainJson = SecureStorage.Decrypt(encData);
+                            imported = JsonSerializer.Deserialize<List<Account>>(plainJson) ?? [];
+                        }
+                        catch (CryptographicException)
+                        {
+                            MessageBox.Show(
+                                "Entschlüsselung fehlgeschlagen.\n\nDiese Datei wurde mit einem anderen Schlüssel erstellt.\nStelle sicher, dass der richtige Schlüssel geladen ist.",
+                                "Falscher Schlüssel", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            return;
+                        }
+                    }
+                }
+                catch { /* not a lamenc file – fall through to plain JSON */ }
+
+                // Plain JSON fallback
+                if (imported == null)
+                    imported = JsonSerializer.Deserialize<List<Account>>(fileContent) ?? [];
+
+                if (imported.Count == 0)
+                {
+                    MessageBox.Show("Die Datei enthält keine Accounts.", "Import", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                var mergeChoice = MessageBox.Show(
+                    $"{imported.Count} Account(s) gefunden.\n\n" +
+                    "Ja = Zusammenführen (bestehende behalten, neue hinzufügen)\n" +
+                    "Nein = Ersetzen (alle bestehenden Accounts löschen)",
+                    "Import-Modus", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+
+                if (mergeChoice == DialogResult.Cancel) return;
+
+                if (mergeChoice == DialogResult.No)
+                    accounts.Clear();
+
+                int nextId = accounts.Count > 0 ? accounts.Max(a => a.Id) + 1 : 1;
+                int added = 0;
+
+                foreach (var imp in imported)
+                {
+                    // After parsing (plain JSON or decrypted .lamenc), passwords are always plaintext
+                    accounts.Add(new Account
+                    {
+                        Id = nextId++,
+                        Name = imp.Name,
+                        Tag = imp.Tag,
+                        Username = imp.Username,
+                        Password = SecureStorage.Encrypt(imp.Password),
+                        Region = imp.Region,
+                        Created = imp.Created
+                    });
+                    added++;
+                }
+
+                SaveAccounts();
+                SendToFrontend(new { type = "toast", message = $"{added} Account(s) importiert!", level = "success" });
+                // Notify frontend to refresh its account list
+                SendToFrontend(new { type = "accountsImported" });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Fehler beim Importieren:\n{ex.Message}", "Import-Fehler", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 

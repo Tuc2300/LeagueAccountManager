@@ -22,7 +22,7 @@
                     <i class="fas fa-cog"></i>
                 </button>
                 <button id="addBtn" class="btn-add">
-                    <i class="fas fa-plus"></i> Neuer Account
+                    <i class="fas fa-plus"></i><span class="btn-add-label"> Neuer Account</span>
                 </button>
             </div>
         </header>
@@ -33,11 +33,9 @@
         </div>
 
         <div class="account-list" id="accountList">
-            <!-- Wird dynamisch befüllt -->
         </div>
     </div>
 
-    <!-- Modal für Account erstellen/bearbeiten -->
     <div id="accountModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -102,7 +100,6 @@
         </div>
     </div>
 
-    <!-- Modal für Löschen-Bestätigung -->
     <div id="deleteModal" class="modal">
         <div class="modal-content modal-small">
             <div class="modal-header">
@@ -126,7 +123,6 @@
         </div>
     </div>
 
-    <!-- Login Progress Modal -->
     <div id="loginProgressModal" class="modal">
         <div class="modal-content modal-small">
             <div class="modal-header">
@@ -160,7 +156,6 @@
         </div>
     </div>
 
-    <!-- Update Banner -->
     <div id="updateBanner" class="update-banner" style="display:none;">
         <div class="update-banner-content">
             <div class="update-info">
@@ -184,7 +179,6 @@
         </div>
     </div>
 
-    <!-- Password Generator Modal -->
     <div id="passwordGenModal" class="modal">
         <div class="modal-content modal-small">
             <div class="modal-header">
@@ -242,7 +236,6 @@
         </div>
     </div>
 
-    <!-- Settings Modal -->
     <div id="settingsModal" class="modal">
         <div class="modal-content modal-medium">
             <div class="modal-header">
@@ -252,6 +245,31 @@
                 </button>
             </div>
             <div class="modal-body">
+                <div class="settings-section">
+                    <h3><i class="fas fa-shield-halved"></i> Schlüssel & Daten</h3>
+                    <div class="data-actions">
+                        <button class="btn-data" onclick="exportKey()">
+                            <i class="fas fa-key"></i>
+                            <span>Schlüssel-Backup</span>
+                        </button>
+                        <button class="btn-data" onclick="changeKey()">
+                            <i class="fas fa-arrows-rotate"></i>
+                            <span>Schlüssel wechseln</span>
+                        </button>
+                        <button class="btn-data" onclick="exportAccountsEncrypted()">
+                            <i class="fas fa-file-zipper"></i>
+                            <span>Accounts exportieren (verschlüsselt)</span>
+                        </button>
+                        <button class="btn-data" onclick="exportAccountsPlain()">
+                            <i class="fas fa-file-export"></i>
+                            <span>Accounts exportieren (Klartext)</span>
+                        </button>
+                        <button class="btn-data" onclick="importAccounts()">
+                            <i class="fas fa-file-import"></i>
+                            <span>Accounts importieren</span>
+                        </button>
+                    </div>
+                </div>
                 <div class="settings-section">
                     <h3>Akzentfarbe</h3>
                     <div class="color-grid" id="colorGrid"></div>
@@ -283,7 +301,6 @@
         </div>
     </div>
 
-    <!-- Toast Notification -->
     <div id="toast" class="toast">
         <i id="toastIcon" class="fas fa-check-circle"></i>
         <span id="toastMessage"></span>
